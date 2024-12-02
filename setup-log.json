@@ -1,0 +1,9 @@
+{
+  "service_id": "wave-server",
+  "service_name": "Wave Server",
+  "domain": "https://wave-server.noshado.ws",
+  "host": "localhost",
+  "port": "3107",
+  "author": "leo",
+  "created_on": "Mon 02 Dec 2024 03:09:04 PM EST"
+}
