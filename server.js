@@ -6,7 +6,7 @@ import fs from "fs";
 const app = express();
 const port = 3107;
 
-const groups = ["ASIA2425"];
+const groups = ["ASIA2425", "STRAWBERRY"];
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -31,7 +31,9 @@ const getGroupUsers = (groupId) => {
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = "groups/" + groups[0] + "/media";
+    const filename = file.originalname;
+    const groupId = filename.split("-")[0];
+    const uploadDir = "groups/" + groupId + "/media";
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir);
     }
