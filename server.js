@@ -117,6 +117,19 @@ app.get("/media/:groupId", (req, res) => {
       const users = getGroupUsers(groupId);
       const uploader = users.find((user) => user.id === uploaderId);
 
+      // Get reactions for this media file
+      let reactions = [];
+      const reactionsFile = path.join(
+        "groups",
+        groupId,
+        "reactions",
+        `${filename}.json`
+      );
+      if (fs.existsSync(reactionsFile)) {
+        const reactionsData = fs.readFileSync(reactionsFile, "utf8");
+        reactions = JSON.parse(reactionsData);
+      }
+
       return {
         filename: filename,
         uploader: {
@@ -125,7 +138,17 @@ app.get("/media/:groupId", (req, res) => {
         },
         path: `/groups/${groupId}/media/${filename}`,
         size: stats.size,
-        created: stats.birthtime
+        created: stats.birthtime,
+        reactions: reactions.map((r) => {
+          const user = users.find((u) => u.id === r.userId);
+          return {
+            ...r,
+            user: {
+              id: user?.id || "unknown",
+              name: user?.name || "Unknown"
+            }
+          };
+        })
       };
     });
 
@@ -151,6 +174,76 @@ app.get("/media/:groupId/:filename", (req, res) => {
     }
 
     res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/media/:groupId/:filename/reactions", (req, res) => {
+  try {
+    const { groupId, filename } = req.params;
+    const { userId, reaction } = req.body;
+
+    // Validate required fields
+    if (!userId || !reaction) {
+      return res
+        .status(400)
+        .json({ error: "userId and reaction are required" });
+    }
+
+    // Verify the media file exists
+    const mediaPath = path.join("groups", groupId, "media", filename);
+    if (!fs.existsSync(mediaPath)) {
+      return res.status(404).json({ error: "Media file not found" });
+    }
+
+    // Create reactions directory if it doesn't exist
+    const reactionsDir = path.join("groups", groupId, "reactions");
+    if (!fs.existsSync(reactionsDir)) {
+      fs.mkdirSync(reactionsDir, { recursive: true });
+    }
+
+    // Create/update reactions file for the media item
+    const reactionsFile = path.join(reactionsDir, `${filename}.json`);
+    let reactions = [];
+
+    if (fs.existsSync(reactionsFile)) {
+      const data = fs.readFileSync(reactionsFile, "utf8");
+      reactions = JSON.parse(data);
+
+      // Check if user already has the same reaction
+      const existingReaction = reactions.find(
+        (r) => r.userId === userId && r.reaction === reaction
+      );
+      if (existingReaction) {
+        // Remove the reaction if it already exists
+        reactions = reactions.filter((r) => r.userId !== userId);
+      } else {
+        // Remove any different reaction from this user
+        reactions = reactions.filter((r) => r.userId !== userId);
+        // Add new reaction
+        reactions.push({
+          userId,
+          reaction,
+          timestamp: new Date().toISOString()
+        });
+      }
+    } else {
+      // Add new reaction if no reactions file exists
+      reactions.push({
+        userId,
+        reaction,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Save reactions to file
+    fs.writeFileSync(reactionsFile, JSON.stringify(reactions, null, 2));
+
+    res.json({
+      success: true,
+      reactions: reactions
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
