@@ -223,7 +223,7 @@ app.get("/media/:groupId", (req, res) => {
                 },
                 path: `/groups/${groupId}/media/${filename}`,
                 size: stats.size,
-                created: stats.birthtime,
+                created: parseInt(filename.split("-")[0]),
                 reactions: reactions.map((r) => {
                   const user = users.find((u) => u.id === r.userId);
                   return {
