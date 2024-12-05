@@ -7,7 +7,7 @@ import sharp from "sharp";
 const app = express();
 const port = 3107;
 
-const groups = ["ASIA2425", "STRAWBERRY"];
+const groups = ["ASIA2425", "STRAWBERRY", "LEOTEST"];
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
