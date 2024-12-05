@@ -2,6 +2,7 @@ import express from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import sharp from "sharp";
 
 const app = express();
 const port = 3107;
@@ -70,22 +71,45 @@ const upload = multer({
   }
 });
 
-app.post("/upload", upload.array("media", 10), (req, res) => {
+app.post("/upload", upload.array("media", 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: "No media files provided!" });
     }
 
-    req.files.forEach((file) => {
-      const extension = file.originalname.split(".").pop();
+    for (const file of req.files) {
       const uploaderId = req.body.uploaderId;
       const newFilename = `${Date.now()}-${uploaderId}-${Math.floor(
         Math.random() * 10000000000
-      )}.${extension}`;
-      fs.renameSync(file.path, path.join(path.dirname(file.path), newFilename));
+      )}.jpg`;
+      const newPath = path.join(path.dirname(file.path), newFilename);
+
+      if (file.mimetype.startsWith("image/")) {
+        await sharp(file.path)
+          .rotate() // Auto-rotate based on EXIF orientation
+          .resize(1920, 1080, {
+            fit: "inside",
+            withoutEnlargement: true
+          })
+          .jpeg({ quality: 100 })
+          .toFile(newPath);
+
+        fs.unlinkSync(file.path);
+      } else {
+        const extension = file.originalname.split(".").pop().toLowerCase();
+        const videoFilename = `${Date.now()}-${uploaderId}-${Math.floor(
+          Math.random() * 10000000000
+        )}.${extension}`;
+        const videoPath = path.join(path.dirname(file.path), videoFilename);
+        fs.renameSync(file.path, videoPath);
+        file.filename = videoFilename;
+        file.path = videoPath;
+        continue;
+      }
+
       file.filename = newFilename;
-      file.path = path.join(path.dirname(file.path), newFilename);
-    });
+      file.path = newPath;
+    }
 
     res.json({
       message: `Successfully uploaded ${req.files.length} media file${
@@ -94,7 +118,6 @@ app.post("/upload", upload.array("media", 10), (req, res) => {
     });
   } catch (error) {
     console.error("Upload error:", error);
-
     res.status(500).json({
       error: "An error occurred while uploading files!",
       details: error.message
