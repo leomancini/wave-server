@@ -179,6 +179,8 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
 app.get("/media/:groupId", (req, res) => {
   try {
     const groupId = req.params.groupId;
+    const page = parseInt(req.query.page) || 1;
+    const limit = 10;
     const mediaDir = `groups/${groupId}/media`;
 
     if (!fs.existsSync(mediaDir)) {
@@ -195,7 +197,6 @@ app.get("/media/:groupId", (req, res) => {
 
               const filenameParts = filename.split("-");
               if (filenameParts.length < 2) {
-                console.warn(`Skipping malformed filename: ${filename}`);
                 return null;
               }
 
@@ -241,10 +242,20 @@ app.get("/media/:groupId", (req, res) => {
 
     mediaFiles.sort((a, b) => b.created - a.created);
 
+    // Calculate pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+    const totalPages = Math.ceil(mediaFiles.length / limit);
+    const paginatedFiles = mediaFiles.slice(startIndex, endIndex);
+
     res.json({
       groupId: groupId,
       mediaCount: mediaFiles.length,
-      media: mediaFiles
+      currentPage: page,
+      totalPages: totalPages,
+      hasMore: page < totalPages,
+      hasPrevPage: page > 1,
+      media: paginatedFiles
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
