@@ -60,13 +60,10 @@ const upload = multer({
       return;
     }
 
-    if (
-      file.mimetype.startsWith("image/") ||
-      file.mimetype.startsWith("video/")
-    ) {
+    if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
-      cb(new Error("Only image or video files are allowed!"));
+      cb(new Error("Only image files are allowed!"));
     }
   }
 });
@@ -135,7 +132,14 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
       )}.jpg`;
       const newPath = path.join(path.dirname(file.path), newFilename);
 
+      let dimensions;
       if (file.mimetype.startsWith("image/")) {
+        const imageMetadata = await sharp(file.path).metadata();
+        dimensions = {
+          width: imageMetadata.width,
+          height: imageMetadata.height
+        };
+
         await sharp(file.path)
           .rotate()
           .resize(1920, 1080, {
@@ -146,16 +150,42 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
           .toFile(newPath);
 
         fs.unlinkSync(file.path);
-      } else {
-        const extension = file.originalname.split(".").pop().toLowerCase();
-        const videoFilename = `${Date.now()}-${uploaderId}-${Math.floor(
-          Math.random() * 10000000000
-        )}.${extension}`;
-        const videoPath = path.join(path.dirname(file.path), videoFilename);
-        fs.renameSync(file.path, videoPath);
-        file.filename = videoFilename;
-        file.path = videoPath;
-        continue;
+      }
+
+      const groupId = file.originalname.split("-")[0];
+      const metadataDir = path.join("groups", groupId, "metadata");
+      if (!fs.existsSync(metadataDir)) {
+        fs.mkdirSync(metadataDir, { recursive: true });
+      }
+
+      const metadata = {
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+        uploadDate: Date.now(),
+        uploaderId: uploaderId,
+        dimensions
+      };
+
+      fs.writeFileSync(
+        path.join(metadataDir, `${path.parse(newFilename).name}.json`),
+        JSON.stringify(metadata, null, 2)
+      );
+
+      const thumbnailsDir = path.join("groups", groupId, "thumbnails");
+      if (!fs.existsSync(thumbnailsDir)) {
+        fs.mkdirSync(thumbnailsDir, { recursive: true });
+      }
+
+      if (file.mimetype.startsWith("image/")) {
+        const thumbnailPath = path.join(thumbnailsDir, newFilename);
+        await sharp(newPath)
+          .resize(128, 128, {
+            fit: "inside",
+            withoutEnlargement: true
+          })
+          .jpeg({ quality: 50 })
+          .toFile(thumbnailPath);
       }
 
       file.filename = newFilename;
@@ -266,6 +296,21 @@ app.get("/media/:groupId/:filename", (req, res) => {
   try {
     const { groupId, filename } = req.params;
     const filePath = path.join("groups", groupId, "media", filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "Media file not found" });
+    }
+
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/media/:groupId/:filename/thumbnail", (req, res) => {
+  try {
+    const { groupId, filename } = req.params;
+    const filePath = path.join("groups", groupId, "thumbnails", filename);
 
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "Media file not found" });
