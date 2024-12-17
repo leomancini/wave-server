@@ -180,6 +180,18 @@ app.get("/media/:groupId", (req, res) => {
                 reactions = JSON.parse(reactionsData);
               }
 
+              let metadata = {};
+              const metadataFile = path.join(
+                "groups",
+                groupId,
+                "metadata",
+                `${path.parse(filename).name}.json`
+              );
+              if (fs.existsSync(metadataFile)) {
+                const metadataData = fs.readFileSync(metadataFile, "utf8");
+                metadata = JSON.parse(metadataData);
+              }
+
               return {
                 filename: filename,
                 uploader: {
@@ -187,8 +199,7 @@ app.get("/media/:groupId", (req, res) => {
                   name: uploader?.name || "Unknown"
                 },
                 path: `/groups/${groupId}/media/${filename}`,
-                size: stats.size,
-                created: parseInt(filename.split("-")[0]),
+                metadata,
                 reactions: reactions.map((r) => {
                   const user = users.find((u) => u.id === r.userId);
                   return {
