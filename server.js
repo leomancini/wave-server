@@ -68,6 +68,7 @@ const upload = multer({
 
 import saveMetadata from "./functions/saveMetadata.js";
 import generateThumbnail from "./functions/generateThumbnail.js";
+import getDimensions from "./functions/getDimensions.js";
 
 import compressGroupMedia from "./utilities/compress-group-media.js";
 import addMetadataAndThumbnails from "./utilities/add-metadata-and-thumbnails.js";
@@ -95,13 +96,8 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
       )}.jpg`;
       const newPath = path.join(path.dirname(file.path), newFilename);
 
-      let dimensions;
       if (file.mimetype.startsWith("image/")) {
-        const imageMetadata = await sharp(file.path).metadata();
-        dimensions = {
-          width: imageMetadata.width,
-          height: imageMetadata.height
-        };
+        const dimensions = await getDimensions(file.path);
 
         await sharp(file.path)
           .rotate()
@@ -113,12 +109,10 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
           .toFile(newPath);
 
         fs.unlinkSync(file.path);
-      }
 
-      const groupId = file.originalname.split("-")[0];
-      await saveMetadata(groupId, file, newFilename, uploaderId, dimensions);
+        const groupId = file.originalname.split("-")[0];
+        await saveMetadata(groupId, file, newFilename, uploaderId, dimensions);
 
-      if (file.mimetype.startsWith("image/")) {
         await generateThumbnail(groupId, newPath, newFilename);
       }
 

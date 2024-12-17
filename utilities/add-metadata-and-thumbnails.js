@@ -4,6 +4,7 @@ import sharp from "sharp";
 
 import saveMetadata from "../functions/saveMetadata.js";
 import generateThumbnail from "../functions/generateThumbnail.js";
+import getDimensions from "../functions/getDimensions.js";
 
 export default async (groupId) => {
   try {
@@ -26,11 +27,7 @@ export default async (groupId) => {
           const uploaderId = filenameParts[1];
           const stats = fs.statSync(filePath);
 
-          const imageMetadata = await sharp(filePath).metadata();
-          const dimensions = {
-            width: imageMetadata.width,
-            height: imageMetadata.height
-          };
+          const dimensions = await getDimensions(filePath);
 
           await saveMetadata(
             groupId,
