@@ -7,8 +7,6 @@ import sharp from "sharp";
 const app = express();
 const port = 3107;
 
-const groups = ["ASIA2425", "STRAWBERRY", "LEOTEST"];
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -68,55 +66,20 @@ const upload = multer({
   }
 });
 
-app.get("/compress-group/:groupId", async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    const mediaPath = `groups/${groupId}/media`;
+import saveMetadata from "./functions/saveMetadata.js";
+import generateThumbnail from "./functions/generateThumbnail.js";
 
-    if (!fs.existsSync(mediaPath)) {
-      return res.status(404).json({ error: "Group media directory not found" });
-    }
+import compressGroupMedia from "./utilities/compress-group-media.js";
+import addMetadataAndThumbnails from "./utilities/add-metadata-and-thumbnails.js";
 
-    const files = fs.readdirSync(mediaPath);
-    let compressedCount = 0;
+app.get("/compress-group-media/:groupId", async (req, res) => {
+  const result = await compressGroupMedia(req.params.groupId);
+  res.json(result);
+});
 
-    for (const file of files) {
-      const filePath = path.join(mediaPath, file);
-      const fileExt = path.extname(file).toLowerCase();
-
-      if ([".jpg", ".jpeg", ".png"].includes(fileExt)) {
-        try {
-          const compressedPath = path.join(mediaPath, `compressed_${file}`);
-
-          await sharp(filePath)
-            .rotate()
-            .resize(1920, 1080, {
-              fit: "inside",
-              withoutEnlargement: true
-            })
-            .jpeg({ quality: 100 })
-            .toFile(compressedPath);
-
-          fs.unlinkSync(filePath);
-          fs.renameSync(compressedPath, filePath);
-
-          compressedCount++;
-        } catch (err) {
-          console.error(`Error compressing ${file}:`, err);
-          continue;
-        }
-      }
-    }
-
-    res.json({
-      message: `Successfully compressed ${compressedCount} images in group ${groupId}`
-    });
-  } catch (error) {
-    console.error("Compression error:", error);
-    res.status(500).json({
-      error: "An error occurred while compressing group images"
-    });
-  }
+app.get("/add-metadata-and-thumbnails/:groupId", async (req, res) => {
+  const result = await addMetadataAndThumbnails(req.params.groupId);
+  res.json(result);
 });
 
 app.post("/upload", upload.array("media", 10), async (req, res) => {
@@ -153,39 +116,10 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
       }
 
       const groupId = file.originalname.split("-")[0];
-      const metadataDir = path.join("groups", groupId, "metadata");
-      if (!fs.existsSync(metadataDir)) {
-        fs.mkdirSync(metadataDir, { recursive: true });
-      }
-
-      const metadata = {
-        originalName: file.originalname,
-        mimeType: file.mimetype,
-        size: file.size,
-        uploadDate: Date.now(),
-        uploaderId: uploaderId,
-        dimensions
-      };
-
-      fs.writeFileSync(
-        path.join(metadataDir, `${path.parse(newFilename).name}.json`),
-        JSON.stringify(metadata, null, 2)
-      );
-
-      const thumbnailsDir = path.join("groups", groupId, "thumbnails");
-      if (!fs.existsSync(thumbnailsDir)) {
-        fs.mkdirSync(thumbnailsDir, { recursive: true });
-      }
+      await saveMetadata(groupId, file, newFilename, uploaderId, dimensions);
 
       if (file.mimetype.startsWith("image/")) {
-        const thumbnailPath = path.join(thumbnailsDir, newFilename);
-        await sharp(newPath)
-          .resize(128, 128, {
-            fit: "inside",
-            withoutEnlargement: true
-          })
-          .jpeg({ quality: 50 })
-          .toFile(thumbnailPath);
+        await generateThumbnail(groupId, newPath, newFilename);
       }
 
       file.filename = newFilename;
@@ -272,7 +206,6 @@ app.get("/media/:groupId", (req, res) => {
 
     mediaFiles.sort((a, b) => b.created - a.created);
 
-    // Calculate pagination
     const startIndex = (page - 1) * limit;
     const endIndex = page * limit;
     const totalPages = Math.ceil(mediaFiles.length / limit);
