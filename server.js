@@ -215,7 +215,7 @@ app.get("/media/:groupId", (req, res) => {
             .filter(Boolean)
         : [];
 
-    mediaFiles.sort((a, b) => b.created - a.created);
+    mediaFiles.sort((a, b) => b.metadata.uploadDate - a.metadata.uploadDate);
 
     const startIndex = (page - 1) * limit;
     const endIndex = page * limit;
