@@ -145,6 +145,21 @@ app.get("/media/:groupId", (req, res) => {
       return res.status(404).json({ error: "Group media directory not found" });
     }
 
+    const addUsernames = (data) => {
+      const users = getGroupUsers(groupId);
+
+      return data.map((r) => {
+        const user = users.find((u) => u.id === r.userId);
+        return {
+          ...r,
+          user: {
+            id: user?.id || "unknown",
+            name: user?.name || "Unknown"
+          }
+        };
+      });
+    };
+
     const files = fs.readdirSync(mediaDir);
     const mediaFiles =
       files.length > 0
@@ -167,7 +182,7 @@ app.get("/media/:groupId", (req, res) => {
                 "groups",
                 groupId,
                 "reactions",
-                `${filename}.json`
+                `${path.parse(filename).name}.json`
               );
               if (fs.existsSync(reactionsFile)) {
                 const reactionsData = fs.readFileSync(reactionsFile, "utf8");
@@ -186,6 +201,18 @@ app.get("/media/:groupId", (req, res) => {
                 metadata = JSON.parse(metadataData);
               }
 
+              let comments = [];
+              const commentsFile = path.join(
+                "groups",
+                groupId,
+                "comments",
+                `${path.parse(filename).name}.json`
+              );
+              if (fs.existsSync(commentsFile)) {
+                const commentsData = fs.readFileSync(commentsFile, "utf8");
+                comments = JSON.parse(commentsData);
+              }
+
               return {
                 filename: filename,
                 uploader: {
@@ -194,16 +221,8 @@ app.get("/media/:groupId", (req, res) => {
                 },
                 path: `/groups/${groupId}/media/${filename}`,
                 metadata,
-                reactions: reactions.map((r) => {
-                  const user = users.find((u) => u.id === r.userId);
-                  return {
-                    ...r,
-                    user: {
-                      id: user?.id || "unknown",
-                      name: user?.name || "Unknown"
-                    }
-                  };
-                })
+                reactions: addUsernames(reactions),
+                comments: addUsernames(comments)
               };
             })
             .filter(Boolean)
@@ -281,7 +300,10 @@ app.post("/media/:groupId/:filename/reactions", (req, res) => {
       fs.mkdirSync(reactionsDir, { recursive: true });
     }
 
-    const reactionsFile = path.join(reactionsDir, `${filename}.json`);
+    const reactionsFile = path.join(
+      reactionsDir,
+      `${path.parse(filename).name}.json`
+    );
     let reactions = [];
 
     if (fs.existsSync(reactionsFile)) {
@@ -314,6 +336,53 @@ app.post("/media/:groupId/:filename/reactions", (req, res) => {
     res.json({
       success: true,
       reactions: reactions
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/media/:groupId/:filename/comment", async (req, res) => {
+  try {
+    const { groupId, filename } = req.params;
+    const { userId, comment } = req.body;
+
+    if (!userId || !comment) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const mediaPath = path.join("groups", groupId, "media", filename);
+    if (!fs.existsSync(mediaPath)) {
+      return res.status(404).json({ error: "Media file not found" });
+    }
+
+    const commentsDir = path.join("groups", groupId, "comments");
+    if (!fs.existsSync(commentsDir)) {
+      fs.mkdirSync(commentsDir, { recursive: true });
+    }
+
+    const commentsFile = path.join(
+      commentsDir,
+      `${path.parse(filename).name}.json`
+    );
+    let comments = [];
+
+    if (fs.existsSync(commentsFile)) {
+      const data = fs.readFileSync(commentsFile, "utf8");
+      comments = JSON.parse(data);
+    }
+
+    comments.push({
+      userId,
+      comment,
+      timestamp: new Date().toISOString()
+    });
+
+    fs.writeFileSync(commentsFile, JSON.stringify(comments, null, 2));
+
+    res.json({
+      success: true,
+      comments: comments
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
