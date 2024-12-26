@@ -389,7 +389,7 @@ app.post("/media/:groupId/:filename/comment", async (req, res) => {
   }
 });
 
-app.get("/validate-user/:groupId/:userId", (req, res) => {
+app.get("/validate-group-user/:groupId/:userId", (req, res) => {
   try {
     const { groupId, userId } = req.params;
 
