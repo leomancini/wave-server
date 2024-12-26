@@ -388,3 +388,30 @@ app.post("/media/:groupId/:filename/comment", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+app.get("/validate-user/:groupId/:userId", (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+
+    const groupPath = path.join("groups", groupId);
+    if (!fs.existsSync(groupPath)) {
+      return res.status(404).json({
+        valid: false,
+        error: "Group not found"
+      });
+    }
+
+    const users = getGroupUsers(groupId);
+    const userExists = users.some((user) => user.id === userId);
+
+    res.json({
+      valid: userExists,
+      error: userExists ? null : "User not found in group"
+    });
+  } catch (error) {
+    res.status(500).json({
+      valid: false,
+      error: error.message
+    });
+  }
+});
