@@ -53,6 +53,11 @@ const upload = multer({
       (user) => user.id === uploaderId
     );
 
+    if (groupId === "DEMO") {
+      cb(new Error("Tried to upload media to demo group, file rejected!"));
+      return;
+    }
+
     if (!isKnownUser) {
       cb(new Error("Unknown user tried to upload, file rejected!"));
       return;
