@@ -415,3 +415,56 @@ app.get("/validate-group-user/:groupId/:userId", (req, res) => {
     });
   }
 });
+
+app.post("/create-group", (req, res) => {
+  try {
+    const { groupName, userName } = req.body;
+
+    if (!groupName || !userName) {
+      return res.status(400).json({
+        error: "Group name and username are required"
+      });
+    }
+
+    const groupId = groupName.toUpperCase().replace(/\s+/g, "-");
+    const groupPath = path.join("groups", groupId);
+
+    if (fs.existsSync(groupPath)) {
+      return res.status(400).json({
+        error: "A group with this name already exists"
+      });
+    }
+
+    const userId = Math.floor(Math.random() * 1000000).toString();
+
+    fs.mkdirSync(groupPath);
+    fs.mkdirSync(path.join(groupPath, "media"));
+    fs.mkdirSync(path.join(groupPath, "metadata"));
+    fs.mkdirSync(path.join(groupPath, "thumbnails"));
+    fs.mkdirSync(path.join(groupPath, "reactions"));
+    fs.mkdirSync(path.join(groupPath, "comments"));
+
+    const users = [
+      {
+        id: userId,
+        name: userName
+      }
+    ];
+    fs.writeFileSync(
+      path.join(groupPath, "users.json"),
+      JSON.stringify(users, null, 2)
+    );
+
+    res.json({
+      success: true,
+      groupId,
+      userId,
+      message: "Group created successfully"
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to create group",
+      details: error.message
+    });
+  }
+});
