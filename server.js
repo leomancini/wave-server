@@ -24,9 +24,11 @@ app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
 });
 
-const getGroupUsers = (groupId) => {
-  return JSON.parse(fs.readFileSync(`groups/${groupId}/users.json`, "utf8"));
-};
+import saveMetadata from "./functions/saveMetadata.js";
+import generateThumbnail from "./functions/generateThumbnail.js";
+import getDimensions from "./functions/getDimensions.js";
+import getGroupUsers from "./functions/getGroupUsers.js";
+import generateUserId from "./functions/generateUserId.js";
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -70,10 +72,6 @@ const upload = multer({
     }
   }
 });
-
-import saveMetadata from "./functions/saveMetadata.js";
-import generateThumbnail from "./functions/generateThumbnail.js";
-import getDimensions from "./functions/getDimensions.js";
 
 import compressGroupMedia from "./utilities/compress-group-media.js";
 import addMetadataAndThumbnails from "./utilities/add-metadata-and-thumbnails.js";
@@ -449,7 +447,7 @@ app.post("/create-group", (req, res) => {
       });
     }
 
-    const userId = Math.floor(Math.random() * 1000000).toString();
+    const userId = generateUserId();
 
     fs.mkdirSync(groupPath);
     fs.mkdirSync(path.join(groupPath, "media"));
@@ -506,7 +504,7 @@ app.post("/join-group", async (req, res) => {
     const users = JSON.parse(fs.readFileSync(usersPath, "utf8"));
 
     do {
-      userId = Math.floor(Math.random() * 1000000).toString();
+      userId = generateUserId();
     } while (users.some((user) => user.id === userId));
 
     users.push({
