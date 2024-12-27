@@ -431,6 +431,14 @@ app.post("/create-group", (req, res) => {
       });
     }
 
+    const disallowedGroupNames = ["create-group", "create-user"];
+
+    if (disallowedGroupNames.includes(groupName)) {
+      return res.status(400).json({
+        error: "Group name is not allowed"
+      });
+    }
+
     const groupId = groupName.toUpperCase().replace(/\s+/g, "-");
     const groupPath = path.join("groups", groupId);
 
@@ -469,6 +477,53 @@ app.post("/create-group", (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: "Failed to create group",
+      details: error.message
+    });
+  }
+});
+
+app.post("/join-group", async (req, res) => {
+  try {
+    const { groupId, userName } = req.body;
+
+    if (!groupId || !userName) {
+      return res.status(400).json({
+        error: "Group ID and user name are required"
+      });
+    }
+
+    const groupPath = path.join("groups", groupId);
+    const usersPath = path.join(groupPath, "users.json");
+
+    if (!fs.existsSync(groupPath)) {
+      return res.status(404).json({
+        error: "Group not found"
+      });
+    }
+
+    let userId;
+    const users = JSON.parse(fs.readFileSync(usersPath, "utf8"));
+
+    do {
+      userId = Math.floor(Math.random() * 1000000).toString();
+    } while (users.some((user) => user.id === userId));
+
+    users.push({
+      id: userId,
+      name: userName
+    });
+
+    fs.writeFileSync(usersPath, JSON.stringify(users, null, 2));
+
+    res.json({
+      success: true,
+      groupId,
+      userId,
+      message: "Successfully joined group"
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to join group",
       details: error.message
     });
   }
