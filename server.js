@@ -440,7 +440,7 @@ app.post("/create-group", (req, res) => {
       });
     }
 
-    const groupId = groupName.toUpperCase().replace(/\s+/g, "_");
+    const groupId = groupName.toUpperCase().replace(/[\s-]+/g, "_");
     const groupPath = path.join("groups", groupId);
 
     if (fs.existsSync(groupPath)) {
