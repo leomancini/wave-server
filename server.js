@@ -411,6 +411,7 @@ app.get("/validate-group-user/:groupId/:userId", (req, res) => {
 
     res.json({
       valid: userExists,
+      userName: users.find((user) => user.id === userId)?.name,
       error: userExists ? null : "User not found in group"
     });
   } catch (error) {
