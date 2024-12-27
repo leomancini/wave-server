@@ -1,4 +1,10 @@
-const generateUserId = () =>
-  Math.floor(Math.random() * 900000 + 100000).toString();
+const generateUserId = () => {
+  const chars = "0123456789abcdefghijklmnopqrstuvwxyz";
+  let result = "";
+  for (let i = 0; i < 6; i++) {
+    result += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return result;
+};
 
 export default generateUserId;
