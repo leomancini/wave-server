@@ -166,6 +166,104 @@ app.get("/config/:groupId", (req, res) => {
   }
 });
 
+app.get("/stats/:groupId", (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const groupPath = path.join("groups", groupId);
+
+    if (!fs.existsSync(groupPath)) {
+      return res.status(404).json({
+        error: "Group not found"
+      });
+    }
+
+    // Get user count
+    const usersPath = path.join(groupPath, "users.json");
+    const users = JSON.parse(fs.readFileSync(usersPath, "utf8"));
+    const userCount = users.length;
+
+    // Get media count
+    const mediaPath = path.join(groupPath, "media");
+    const mediaFiles = fs.readdirSync(mediaPath);
+    const mediaCount = mediaFiles.length;
+
+    // Get reaction stats and top reactions
+    const reactionsPath = path.join(groupPath, "reactions");
+    let totalReactions = 0;
+    let reactionCounts = {};
+
+    if (fs.existsSync(reactionsPath)) {
+      const reactionFiles = fs.readdirSync(reactionsPath);
+      reactionFiles.forEach((file) => {
+        const reactions = JSON.parse(
+          fs.readFileSync(path.join(reactionsPath, file), "utf8")
+        );
+        totalReactions += reactions.length;
+
+        reactions.forEach((reaction) => {
+          reactionCounts[reaction.reaction] =
+            (reactionCounts[reaction.reaction] || 0) + 1;
+        });
+      });
+    }
+
+    // Get top 3 reactions
+    const topReactions = Object.entries(reactionCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 3)
+      .map(([reaction, count]) => ({ reaction, count }));
+
+    // Get comment stats
+    const commentsPath = path.join(groupPath, "comments");
+    let totalComments = 0;
+    if (fs.existsSync(commentsPath)) {
+      const commentFiles = fs.readdirSync(commentsPath);
+      totalComments = commentFiles.reduce((sum, file) => {
+        const comments = JSON.parse(
+          fs.readFileSync(path.join(commentsPath, file), "utf8")
+        );
+        return sum + comments.length;
+      }, 0);
+    }
+
+    res.json({
+      userCount,
+      mediaCount,
+      totalReactions,
+      topReactions,
+      totalComments
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to get group statistics",
+      details: error.message
+    });
+  }
+});
+
+app.get("/users/:groupId", (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const usersPath = path.join("groups", groupId, "users.json");
+
+    if (!fs.existsSync(usersPath)) {
+      return res.status(404).json({
+        error: "Group users file not found"
+      });
+    }
+
+    const usersData = fs.readFileSync(usersPath, "utf8");
+    const users = JSON.parse(usersData);
+
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to get group users",
+      details: error.message
+    });
+  }
+});
+
 app.get("/media/:groupId", (req, res) => {
   try {
     const groupId = req.params.groupId;
