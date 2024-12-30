@@ -75,6 +75,7 @@ const upload = multer({
 
 import compressGroupMedia from "./utilities/compress-group-media.js";
 import addMetadataAndThumbnails from "./utilities/add-metadata-and-thumbnails.js";
+import addConfigToExistingGroup from "./utilities/add-config-to-existing-group.js";
 
 app.get("/compress-group-media/:groupId", async (req, res) => {
   const result = await compressGroupMedia(req.params.groupId);
@@ -83,6 +84,11 @@ app.get("/compress-group-media/:groupId", async (req, res) => {
 
 app.get("/add-metadata-and-thumbnails/:groupId", async (req, res) => {
   const result = await addMetadataAndThumbnails(req.params.groupId);
+  res.json(result);
+});
+
+app.get("/add-config-to-existing-group/:groupId", (req, res) => {
+  const result = addConfigToExistingGroup(req.params.groupId);
   res.json(result);
 });
 
@@ -132,6 +138,29 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
     console.error("Upload error:", error);
     res.status(500).json({
       error: "An error occurred while uploading files!",
+      details: error.message
+    });
+  }
+});
+
+app.get("/config/:groupId", (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const configPath = path.join("groups", groupId, "config.json");
+
+    if (!fs.existsSync(configPath)) {
+      return res.status(404).json({
+        error: "Group configuration not found"
+      });
+    }
+
+    const configData = fs.readFileSync(configPath, "utf8");
+    const config = JSON.parse(configData);
+
+    res.json(config);
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to get group configuration",
       details: error.message
     });
   }
@@ -465,6 +494,15 @@ app.post("/create-group", (req, res) => {
     fs.writeFileSync(
       path.join(groupPath, "users.json"),
       JSON.stringify(users, null, 2)
+    );
+
+    const config = {
+      createdAt: new Date().toISOString(),
+      reactions: ["❤️", "‼️", "😂", "🔥", "🌊"]
+    };
+    fs.writeFileSync(
+      path.join(groupPath, "config.json"),
+      JSON.stringify(config, null, 2)
     );
 
     res.json({
