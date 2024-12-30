@@ -16,7 +16,7 @@ export default (groupId) => {
 
     const config = {
       createdAt: new Date(earliestDate).toISOString(),
-      reactions: ["👍", "👎", "🤣", "🤔", "🤮"]
+      reactions: ["❤️", "‼️", "😂", "🔥", "🌊"]
     };
 
     fs.writeFileSync(
