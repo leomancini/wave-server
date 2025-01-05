@@ -3,6 +3,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import sharp from "sharp";
+import QRCode from "qrcode";
 
 const app = express();
 const port = 3107;
@@ -659,6 +660,42 @@ app.post("/join-group", async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: "Failed to join group",
+      details: error.message
+    });
+  }
+});
+
+app.get("/generate-qr-code/:groupId/:userId", async (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+
+    const groupPath = path.join("groups", groupId);
+    const users = getGroupUsers(groupId);
+    const userExists = users.some((user) => user.id === userId);
+
+    if (!fs.existsSync(groupPath) || !userExists) {
+      return res.status(404).json({
+        error: "Invalid group or user"
+      });
+    }
+
+    const url = `https://wave.leo.gd/${groupId}/${userId}`;
+
+    const qrBuffer = await QRCode.toBuffer(url, {
+      errorCorrectionLevel: "H",
+      margin: 1,
+      width: 1024,
+      color: {
+        dark: "#000000",
+        light: "#F2F2F2"
+      }
+    });
+
+    res.type("png");
+    res.send(qrBuffer);
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to generate QR code",
       details: error.message
     });
   }
