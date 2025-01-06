@@ -27,6 +27,7 @@ app.listen(port, () => {
 
 import saveMetadata from "./functions/saveMetadata.js";
 import generateThumbnail from "./functions/generateThumbnail.js";
+import updateUnreadItems from "./functions/updateUnreadItems.js";
 import getDimensions from "./functions/getDimensions.js";
 import getGroupUsers from "./functions/getGroupUsers.js";
 import generateUserId from "./functions/generateUserId.js";
@@ -124,10 +125,14 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
         await saveMetadata(groupId, file, newFilename, uploaderId, dimensions);
 
         await generateThumbnail(groupId, newPath, newFilename);
-      }
 
-      file.filename = newFilename;
-      file.path = newPath;
+        updateUnreadItems(groupId, newFilename, uploaderId).catch((err) => {
+          console.error("Error updating unread items:", err);
+        });
+
+        file.filename = newFilename;
+        file.path = newPath;
+      }
     }
 
     res.json({
@@ -269,9 +274,24 @@ app.get("/users/:groupId", (req, res) => {
 app.get("/media/:groupId", (req, res) => {
   try {
     const groupId = req.params.groupId;
+    const userId = req.query.userId;
     const page = parseInt(req.query.page) || 1;
     const limit = 10;
     const mediaDir = `groups/${groupId}/media`;
+
+    let unreadItems = [];
+    if (userId) {
+      const unreadPath = path.join(
+        "groups",
+        groupId,
+        "users",
+        "unread",
+        `${userId}.json`
+      );
+      if (fs.existsSync(unreadPath)) {
+        unreadItems = JSON.parse(fs.readFileSync(unreadPath, "utf8"));
+      }
+    }
 
     if (!fs.existsSync(mediaDir)) {
       return res.status(404).json({ error: "Group media directory not found" });
@@ -354,7 +374,8 @@ app.get("/media/:groupId", (req, res) => {
                 path: `/groups/${groupId}/media/${filename}`,
                 metadata,
                 reactions: addUsernames(reactions),
-                comments: addUsernames(comments)
+                comments: addUsernames(comments),
+                isUnread: userId ? unreadItems.includes(filename) : undefined
               };
             })
             .filter(Boolean)
@@ -701,6 +722,57 @@ app.get("/generate-qr-code/:groupId/:userId", async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: "Failed to generate QR code",
+      details: error.message
+    });
+  }
+});
+
+app.post("/mark-items-read/:groupId/:userId", async (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const { items } = req.body;
+
+    if (!Array.isArray(items)) {
+      return res.status(400).json({
+        error: "Items must be an array"
+      });
+    }
+
+    const groupPath = path.join("groups", groupId);
+    const users = getGroupUsers(groupId);
+    const userExists = users.some((user) => user.id === userId);
+
+    if (!fs.existsSync(groupPath) || !userExists) {
+      return res.status(404).json({
+        error: "Invalid group or user"
+      });
+    }
+
+    const unreadPath = path.join(
+      groupPath,
+      "users",
+      "unread",
+      `${userId}.json`
+    );
+
+    if (!fs.existsSync(unreadPath)) {
+      return res.status(200).json({
+        message: "No unread items found"
+      });
+    }
+
+    const unreadItems = JSON.parse(fs.readFileSync(unreadPath, "utf8"));
+    const updatedItems = unreadItems.filter((item) => !items.includes(item));
+
+    fs.writeFileSync(unreadPath, JSON.stringify(updatedItems, null, 2));
+
+    res.json({
+      success: true,
+      message: "Successfully marked items as read"
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to mark items as read",
       details: error.message
     });
   }
