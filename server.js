@@ -181,7 +181,7 @@ app.get("/stats/:groupId", (req, res) => {
     // Get user count
     const usersPath = path.join(groupPath, "users.json");
     const users = JSON.parse(fs.readFileSync(usersPath, "utf8"));
-    const userCount = users.filter((user) => !user.isSecondary).length;
+    const userCount = users.filter((user) => !user.isDuplicate).length;
 
     // Get media count
     const mediaPath = path.join(groupPath, "media");
@@ -255,7 +255,7 @@ app.get("/users/:groupId", (req, res) => {
 
     const usersData = fs.readFileSync(usersPath, "utf8");
     let users = JSON.parse(usersData);
-    users = users.filter((user) => !user.isSecondary);
+    users = users.filter((user) => !user.isDuplicate);
 
     res.json(users);
   } catch (error) {
@@ -539,7 +539,7 @@ app.get("/validate-group-user/:groupId/:userId", (req, res) => {
 
     res.json({
       valid: userExists,
-      isSecondary: user?.isSecondary,
+      isDuplicate: user?.isDuplicate,
       primaryId: user?.primaryId,
       userName: user?.name,
       error: userExists ? null : "User not found in group"
