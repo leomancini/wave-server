@@ -247,6 +247,32 @@ app.get("/stats/:groupId", (req, res) => {
   }
 });
 
+app.get("/unread/:groupId/:userId", (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const unreadPath = path.join(
+      "groups",
+      groupId,
+      "users",
+      "unread",
+      `${userId}.json`
+    );
+
+    let unreadCount = 0;
+    if (fs.existsSync(unreadPath)) {
+      const unreadItems = JSON.parse(fs.readFileSync(unreadPath, "utf8"));
+      unreadCount = unreadItems.length;
+    }
+
+    res.json({ unreadCount });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to get unread count",
+      details: error.message
+    });
+  }
+});
+
 app.get("/users/:groupId", (req, res) => {
   try {
     const { groupId } = req.params;
