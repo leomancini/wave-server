@@ -179,7 +179,7 @@ app.get("/stats/:groupId", (req, res) => {
     }
 
     // Get user count
-    const usersPath = path.join(groupPath, "users.json");
+    const usersPath = path.join(groupPath, "users/identities.json");
     const users = JSON.parse(fs.readFileSync(usersPath, "utf8"));
     const userCount = users.filter((user) => !user.isDuplicate).length;
 
@@ -245,7 +245,7 @@ app.get("/stats/:groupId", (req, res) => {
 app.get("/users/:groupId", (req, res) => {
   try {
     const { groupId } = req.params;
-    const usersPath = path.join("groups", groupId, "users.json");
+    const usersPath = path.join("groups", groupId, "users/identities.json");
 
     if (!fs.existsSync(usersPath)) {
       return res.status(404).json({
@@ -582,6 +582,7 @@ app.post("/create-group", (req, res) => {
     const userId = generateUserId();
 
     fs.mkdirSync(groupPath);
+    fs.mkdirSync(path.join(groupPath, "users"));
     fs.mkdirSync(path.join(groupPath, "media"));
     fs.mkdirSync(path.join(groupPath, "metadata"));
     fs.mkdirSync(path.join(groupPath, "thumbnails"));
@@ -595,7 +596,7 @@ app.post("/create-group", (req, res) => {
       }
     ];
     fs.writeFileSync(
-      path.join(groupPath, "users.json"),
+      path.join(groupPath, "users/identities.json"),
       JSON.stringify(users, null, 2)
     );
 
@@ -633,7 +634,7 @@ app.post("/join-group", async (req, res) => {
     }
 
     const groupPath = path.join("groups", groupId);
-    const usersPath = path.join(groupPath, "users.json");
+    const usersPath = path.join(groupPath, "users/identities.json");
 
     if (!fs.existsSync(groupPath)) {
       return res.status(404).json({
