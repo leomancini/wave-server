@@ -91,29 +91,29 @@ const cleanItemId = (itemId) => {
   return itemId;
 };
 
-import compressGroupMedia from "./utilities/compress-group-media.js";
-import addMetadataAndThumbnails from "./utilities/add-metadata-and-thumbnails.js";
-import addConfigToExistingGroup from "./utilities/add-config-to-existing-group.js";
-import updateToItemId from "./utilities/update-to-item-id.js";
-app.get("/compress-group-media/:groupId", async (req, res) => {
-  const result = await compressGroupMedia(req.params.groupId);
-  res.json(result);
-});
+// import compressGroupMedia from "./utilities/compress-group-media.js";
+// app.get("/compress-group-media/:groupId", async (req, res) => {
+//   const result = await compressGroupMedia(req.params.groupId);
+//   res.json(result);
+// });
 
-app.get("/add-metadata-and-thumbnails/:groupId", async (req, res) => {
-  const result = await addMetadataAndThumbnails(req.params.groupId);
-  res.json(result);
-});
+// import addMetadataAndThumbnails from "./utilities/add-metadata-and-thumbnails.js";
+// app.get("/add-metadata-and-thumbnails/:groupId", async (req, res) => {
+//   const result = await addMetadataAndThumbnails(req.params.groupId);
+//   res.json(result);
+// });
 
-app.get("/add-config-to-existing-group/:groupId", (req, res) => {
-  const result = addConfigToExistingGroup(req.params.groupId);
-  res.json(result);
-});
+// import addConfigToExistingGroup from "./utilities/add-config-to-existing-group.js";
+// app.get("/add-config-to-existing-group/:groupId", (req, res) => {
+//   const result = addConfigToExistingGroup(req.params.groupId);
+//   res.json(result);
+// });
 
-app.get("/update-to-item-id", (req, res) => {
-  const result = updateToItemId();
-  res.json(result);
-});
+// import updateToItemId from "./utilities/update-to-item-id.js";
+// app.get("/update-to-item-id", (req, res) => {
+//   const result = updateToItemId();
+//   res.json(result);
+// });
 
 app.post("/upload", upload.array("media", 10), async (req, res) => {
   try {
