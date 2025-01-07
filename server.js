@@ -4,6 +4,9 @@ import path from "path";
 import fs from "fs";
 import sharp from "sharp";
 import QRCode from "qrcode";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 const port = 3107;
@@ -31,6 +34,11 @@ import updateUnreadItems from "./functions/updateUnreadItems.js";
 import getDimensions from "./functions/getDimensions.js";
 import getGroupUsers from "./functions/getGroupUsers.js";
 import generateUserId from "./functions/generateUserId.js";
+import modifyNotificationsQueue from "./functions/modifyNotificationsQueue.js";
+import getMetadataForItem from "./functions/getMetadataForItem.js";
+import getReactionsForItem from "./functions/getReactionsForItem.js";
+import getCommentsForItem from "./functions/getCommentsForItem.js";
+import sendSMS from "./functions/sendSMS.js";
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -75,6 +83,14 @@ const upload = multer({
   }
 });
 
+const cleanItemId = (itemId) => {
+  // This is just to make sure old itemIds are cleaned up
+  if (itemId.includes(".")) {
+    itemId = path.parse(itemId).name;
+  }
+  return itemId;
+};
+
 import compressGroupMedia from "./utilities/compress-group-media.js";
 import addMetadataAndThumbnails from "./utilities/add-metadata-and-thumbnails.js";
 import addConfigToExistingGroup from "./utilities/add-config-to-existing-group.js";
@@ -105,6 +121,7 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
       const newFilename = `${Date.now()}-${uploaderId}-${Math.floor(
         Math.random() * 10000000000
       )}.jpg`;
+      const itemId = path.parse(newFilename).name;
       const newPath = path.join(path.dirname(file.path), newFilename);
 
       if (file.mimetype.startsWith("image/")) {
@@ -122,13 +139,22 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
         fs.unlinkSync(file.path);
 
         const groupId = file.originalname.split("-")[0];
-        await saveMetadata(groupId, file, newFilename, uploaderId, dimensions);
+        await saveMetadata(groupId, file, itemId, uploaderId, dimensions);
 
-        await generateThumbnail(groupId, newPath, newFilename);
+        await generateThumbnail(groupId, newPath, itemId);
 
-        updateUnreadItems(groupId, newFilename, uploaderId).catch((err) => {
+        updateUnreadItems(groupId, itemId, uploaderId).catch((err) => {
           console.error("Error updating unread items:", err);
         });
+
+        modifyNotificationsQueue(
+          "add",
+          groupId,
+          itemId,
+          uploaderId,
+          null,
+          "upload"
+        );
 
         file.filename = newFilename;
         file.path = newPath;
@@ -184,9 +210,8 @@ app.get("/stats/:groupId", (req, res) => {
     }
 
     // Get user count
-    const usersPath = path.join(groupPath, "users/identities.json");
-    const users = JSON.parse(fs.readFileSync(usersPath, "utf8"));
-    const userCount = users.filter((user) => !user.isDuplicate).length;
+    const users = getGroupUsers(groupId);
+    const userCount = users.length;
 
     // Get media count
     const mediaPath = path.join(groupPath, "media");
@@ -284,9 +309,7 @@ app.get("/users/:groupId", (req, res) => {
       });
     }
 
-    const usersData = fs.readFileSync(usersPath, "utf8");
-    let users = JSON.parse(usersData);
-    users = users.filter((user) => !user.isDuplicate);
+    const users = getGroupUsers(groupId);
 
     res.json(users);
   } catch (error) {
@@ -355,41 +378,10 @@ app.get("/media/:groupId", (req, res) => {
               const users = getGroupUsers(groupId);
               const uploader = users.find((user) => user.id === uploaderId);
 
-              let reactions = [];
-              const reactionsFile = path.join(
-                "groups",
-                groupId,
-                "reactions",
-                `${path.parse(filename).name}.json`
-              );
-              if (fs.existsSync(reactionsFile)) {
-                const reactionsData = fs.readFileSync(reactionsFile, "utf8");
-                reactions = JSON.parse(reactionsData);
-              }
-
-              let metadata = {};
-              const metadataFile = path.join(
-                "groups",
-                groupId,
-                "metadata",
-                `${path.parse(filename).name}.json`
-              );
-              if (fs.existsSync(metadataFile)) {
-                const metadataData = fs.readFileSync(metadataFile, "utf8");
-                metadata = JSON.parse(metadataData);
-              }
-
-              let comments = [];
-              const commentsFile = path.join(
-                "groups",
-                groupId,
-                "comments",
-                `${path.parse(filename).name}.json`
-              );
-              if (fs.existsSync(commentsFile)) {
-                const commentsData = fs.readFileSync(commentsFile, "utf8");
-                comments = JSON.parse(commentsData);
-              }
+              const itemId = path.parse(filename).name;
+              const metadata = getMetadataForItem(groupId, itemId);
+              const reactions = getReactionsForItem(groupId, itemId);
+              const comments = getCommentsForItem(groupId, itemId);
 
               return {
                 filename: filename,
@@ -401,7 +393,7 @@ app.get("/media/:groupId", (req, res) => {
                 metadata,
                 reactions: addUsernames(reactions),
                 comments: addUsernames(comments),
-                isUnread: userId ? unreadItems.includes(filename) : undefined
+                isUnread: userId ? unreadItems.includes(itemId) : undefined
               };
             })
             .filter(Boolean)
@@ -428,10 +420,11 @@ app.get("/media/:groupId", (req, res) => {
   }
 });
 
-app.get("/media/:groupId/:filename", (req, res) => {
+app.get("/media/:groupId/:itemId", (req, res) => {
   try {
-    const { groupId, filename } = req.params;
-    const filePath = path.join("groups", groupId, "media", filename);
+    const { groupId } = req.params;
+    const itemId = cleanItemId(req.params.itemId);
+    const filePath = path.join("groups", groupId, "media", `${itemId}.jpg`);
 
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "Media file not found" });
@@ -443,10 +436,16 @@ app.get("/media/:groupId/:filename", (req, res) => {
   }
 });
 
-app.get("/media/:groupId/:filename/thumbnail", (req, res) => {
+app.get("/media/:groupId/:itemId/thumbnail", (req, res) => {
   try {
-    const { groupId, filename } = req.params;
-    const filePath = path.join("groups", groupId, "thumbnails", filename);
+    const { groupId } = req.params;
+    const itemId = cleanItemId(req.params.itemId);
+    const filePath = path.join(
+      "groups",
+      groupId,
+      "thumbnails",
+      `${itemId}.jpg`
+    );
 
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "Media file not found" });
@@ -458,10 +457,12 @@ app.get("/media/:groupId/:filename/thumbnail", (req, res) => {
   }
 });
 
-app.post("/media/:groupId/:filename/reactions", (req, res) => {
+app.post("/media/:groupId/:itemId/reactions", (req, res) => {
   try {
-    const { groupId, filename } = req.params;
+    const { groupId } = req.params;
+    const itemId = cleanItemId(req.params.itemId);
     const { userId, reaction } = req.body;
+    const uploaderId = itemId.split("-")[1];
 
     if (!userId || !reaction) {
       return res
@@ -469,7 +470,7 @@ app.post("/media/:groupId/:filename/reactions", (req, res) => {
         .json({ error: "userId and reaction are required" });
     }
 
-    const mediaPath = path.join("groups", groupId, "media", filename);
+    const mediaPath = path.join("groups", groupId, "media", `${itemId}.jpg`);
     if (!fs.existsSync(mediaPath)) {
       return res.status(404).json({ error: "Media file not found" });
     }
@@ -479,35 +480,41 @@ app.post("/media/:groupId/:filename/reactions", (req, res) => {
       fs.mkdirSync(reactionsDir, { recursive: true });
     }
 
-    const reactionsFile = path.join(
-      reactionsDir,
-      `${path.parse(filename).name}.json`
+    const reactionsFile = path.join(reactionsDir, `${itemId}.json`);
+    let reactions = getReactionsForItem(groupId, itemId);
+
+    const existingReaction = reactions.find(
+      (r) => r.userId === userId && r.reaction === reaction
     );
-    let reactions = [];
-
-    if (fs.existsSync(reactionsFile)) {
-      const data = fs.readFileSync(reactionsFile, "utf8");
-      reactions = JSON.parse(data);
-
-      const existingReaction = reactions.find(
-        (r) => r.userId === userId && r.reaction === reaction
+    if (existingReaction) {
+      reactions = reactions.filter((r) => r.userId !== userId);
+      modifyNotificationsQueue(
+        "remove",
+        groupId,
+        itemId,
+        uploaderId,
+        userId,
+        "reaction"
       );
-      if (existingReaction) {
-        reactions = reactions.filter((r) => r.userId !== userId);
-      } else {
-        reactions = reactions.filter((r) => r.userId !== userId);
-        reactions.push({
-          userId,
-          reaction,
-          timestamp: new Date().toISOString()
-        });
-      }
     } else {
+      const hadDifferentReaction = reactions.some((r) => r.userId === userId);
+      reactions = reactions.filter((r) => r.userId !== userId);
       reactions.push({
         userId,
         reaction,
         timestamp: new Date().toISOString()
       });
+
+      if (!hadDifferentReaction) {
+        modifyNotificationsQueue(
+          "add",
+          groupId,
+          itemId,
+          uploaderId,
+          userId,
+          "reaction"
+        );
+      }
     }
 
     fs.writeFileSync(reactionsFile, JSON.stringify(reactions, null, 2));
@@ -521,16 +528,17 @@ app.post("/media/:groupId/:filename/reactions", (req, res) => {
   }
 });
 
-app.post("/media/:groupId/:filename/comment", async (req, res) => {
+app.post("/media/:groupId/:itemId/comment", async (req, res) => {
   try {
-    const { groupId, filename } = req.params;
+    const { groupId } = req.params;
+    const itemId = cleanItemId(req.params.itemId);
     const { userId, comment } = req.body;
-
+    const uploaderId = itemId.split("-")[1];
     if (!userId || !comment) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const mediaPath = path.join("groups", groupId, "media", filename);
+    const mediaPath = path.join("groups", groupId, "media", `${itemId}.jpg`);
     if (!fs.existsSync(mediaPath)) {
       return res.status(404).json({ error: "Media file not found" });
     }
@@ -540,16 +548,8 @@ app.post("/media/:groupId/:filename/comment", async (req, res) => {
       fs.mkdirSync(commentsDir, { recursive: true });
     }
 
-    const commentsFile = path.join(
-      commentsDir,
-      `${path.parse(filename).name}.json`
-    );
-    let comments = [];
-
-    if (fs.existsSync(commentsFile)) {
-      const data = fs.readFileSync(commentsFile, "utf8");
-      comments = JSON.parse(data);
-    }
+    const commentsFile = path.join(commentsDir, `${itemId}.json`);
+    let comments = getCommentsForItem(groupId, itemId);
 
     comments.push({
       userId,
@@ -558,6 +558,15 @@ app.post("/media/:groupId/:filename/comment", async (req, res) => {
     });
 
     fs.writeFileSync(commentsFile, JSON.stringify(comments, null, 2));
+
+    modifyNotificationsQueue(
+      "add",
+      groupId,
+      itemId,
+      uploaderId,
+      userId,
+      "comment"
+    );
 
     res.json({
       success: true,
@@ -580,7 +589,7 @@ app.get("/validate-group-user/:groupId/:userId", (req, res) => {
       });
     }
 
-    const users = getGroupUsers(groupId);
+    const users = getGroupUsers(groupId, { includeDuplicates: true });
     const userExists = users.some((user) => user.id === userId);
     const user = users.find((user) => user.id === userId);
 
@@ -635,6 +644,7 @@ app.post("/create-group", (req, res) => {
     fs.mkdirSync(path.join(groupPath, "thumbnails"));
     fs.mkdirSync(path.join(groupPath, "reactions"));
     fs.mkdirSync(path.join(groupPath, "comments"));
+    fs.mkdirSync(path.join(groupPath, "notifications"));
 
     const users = [
       {
@@ -802,4 +812,14 @@ app.post("/mark-items-read/:groupId/:userId", async (req, res) => {
       details: error.message
     });
   }
+});
+
+app.get("/send-sms/:phoneNumber/:message/:smsAuthToken", (req, res) => {
+  // const { phoneNumber, message, smsAuthToken } = req.params;
+  // if (smsAuthToken === process.env.SMS_AUTH_TOKEN) {
+  //   sendSMS(phoneNumber, message);
+  //   res.json({ success: true });
+  // } else {
+  //   res.status(401).json({ error: "Unauthorized" });
+  // }
 });

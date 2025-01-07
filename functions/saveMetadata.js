@@ -4,7 +4,7 @@ import * as path from "path";
 export default async (
   groupId,
   file,
-  newFilename,
+  itemId,
   uploaderId,
   dimensions,
   uploadDate
@@ -16,17 +16,17 @@ export default async (
 
   const metadata = {
     originalName: file.originalname,
-    newFilename,
+    itemId,
     mimeType: file.mimetype,
     size: file.size,
     uploadDate: uploadDate,
     uploaderId: uploaderId,
     dimensions,
-    uploadDate: Number(newFilename.split("-")[0])
+    uploadDate: Number(itemId.split("-")[0])
   };
 
   fs.writeFileSync(
-    path.join(metadataDir, `${path.parse(newFilename).name}.json`),
+    path.join(metadataDir, `${itemId}.json`),
     JSON.stringify(metadata, null, 2)
   );
 };
