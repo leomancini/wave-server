@@ -94,7 +94,7 @@ const cleanItemId = (itemId) => {
 import compressGroupMedia from "./utilities/compress-group-media.js";
 import addMetadataAndThumbnails from "./utilities/add-metadata-and-thumbnails.js";
 import addConfigToExistingGroup from "./utilities/add-config-to-existing-group.js";
-
+import updateToItemId from "./utilities/update-to-item-id.js";
 app.get("/compress-group-media/:groupId", async (req, res) => {
   const result = await compressGroupMedia(req.params.groupId);
   res.json(result);
@@ -107,6 +107,11 @@ app.get("/add-metadata-and-thumbnails/:groupId", async (req, res) => {
 
 app.get("/add-config-to-existing-group/:groupId", (req, res) => {
   const result = addConfigToExistingGroup(req.params.groupId);
+  res.json(result);
+});
+
+app.get("/update-to-item-id", (req, res) => {
+  const result = updateToItemId();
   res.json(result);
 });
 
@@ -366,9 +371,6 @@ app.get("/media/:groupId", (req, res) => {
       files.length > 0
         ? files
             .map((filename) => {
-              const filePath = path.join(mediaDir, filename);
-              const stats = fs.statSync(filePath);
-
               const filenameParts = filename.split("-");
               if (filenameParts.length < 2) {
                 return null;
