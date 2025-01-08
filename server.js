@@ -28,6 +28,7 @@ app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
 });
 
+import confirmDirectoryExists from "./functions/confirmDirectoryExists.js";
 import saveMetadata from "./functions/saveMetadata.js";
 import generateThumbnail from "./functions/generateThumbnail.js";
 import updateUnreadItems from "./functions/updateUnreadItems.js";
@@ -45,9 +46,7 @@ const storage = multer.diskStorage({
     const filename = file.originalname;
     const groupId = filename.split("-")[0];
     const uploadDir = "groups/" + groupId + "/media";
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir);
-    }
+    confirmDirectoryExists(uploadDir);
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
@@ -478,9 +477,7 @@ app.post("/media/:groupId/:itemId/reactions", (req, res) => {
     }
 
     const reactionsDir = path.join("groups", groupId, "reactions");
-    if (!fs.existsSync(reactionsDir)) {
-      fs.mkdirSync(reactionsDir, { recursive: true });
-    }
+    confirmDirectoryExists(reactionsDir);
 
     const reactionsFile = path.join(reactionsDir, `${itemId}.json`);
     let reactions = getReactionsForItem(groupId, itemId);
@@ -546,9 +543,7 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
     }
 
     const commentsDir = path.join("groups", groupId, "comments");
-    if (!fs.existsSync(commentsDir)) {
-      fs.mkdirSync(commentsDir, { recursive: true });
-    }
+    confirmDirectoryExists(commentsDir);
 
     const commentsFile = path.join(commentsDir, `${itemId}.json`);
     let comments = getCommentsForItem(groupId, itemId);
@@ -641,12 +636,15 @@ app.post("/create-group", (req, res) => {
 
     fs.mkdirSync(groupPath);
     fs.mkdirSync(path.join(groupPath, "users"));
+    fs.mkdirSync(path.join(groupPath, "users", "unread"));
     fs.mkdirSync(path.join(groupPath, "media"));
     fs.mkdirSync(path.join(groupPath, "metadata"));
     fs.mkdirSync(path.join(groupPath, "thumbnails"));
     fs.mkdirSync(path.join(groupPath, "reactions"));
     fs.mkdirSync(path.join(groupPath, "comments"));
     fs.mkdirSync(path.join(groupPath, "notifications"));
+    fs.mkdirSync(path.join(groupPath, "notifications", "unsent"));
+    fs.mkdirSync(path.join(groupPath, "notifications", "sent"));
 
     const users = [
       {

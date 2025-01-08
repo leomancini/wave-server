@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
+import confirmDirectoryExists from "./confirmDirectoryExists.js";
 import getGroupUsers from "./getGroupUsers.js";
 import getUsername from "./getUsername.js";
 import getCommentsForItem from "./getCommentsForItem.js";
@@ -12,12 +13,18 @@ const modifyNotificationsQueueFileForUser = (
   notification
 ) => {
   const notificationsDir = path.join("groups", groupId, "notifications");
-  if (!fs.existsSync(notificationsDir)) {
-    fs.mkdirSync(notificationsDir);
-  }
+  confirmDirectoryExists(notificationsDir);
+
+  const notificationsUnsentDir = path.join(
+    "groups",
+    groupId,
+    "notifications",
+    "unsent"
+  );
+  confirmDirectoryExists(notificationsUnsentDir);
 
   let notifications = [];
-  const notificationPath = path.join(notificationsDir, `${userId}.json`);
+  const notificationPath = path.join(notificationsUnsentDir, `${userId}.json`);
 
   if (fs.existsSync(notificationPath)) {
     try {
