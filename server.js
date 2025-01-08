@@ -377,7 +377,7 @@ app.get("/media/:groupId", (req, res) => {
               }
 
               const uploaderId = filenameParts[1].split(".")[0];
-              const users = getGroupUsers(groupId);
+              const users = getGroupUsers(groupId, { includeDuplicates: true });
               const uploader = users.find((user) => user.id === uploaderId);
 
               const itemId = path.parse(filename).name;
