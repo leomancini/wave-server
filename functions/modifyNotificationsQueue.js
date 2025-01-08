@@ -6,66 +6,6 @@ import getGroupUsers from "./getGroupUsers.js";
 import getUsername from "./getUsername.js";
 import getCommentsForItem from "./getCommentsForItem.js";
 
-const modifyNotificationsQueueFileForUser = (
-  action,
-  groupId,
-  userId,
-  notification
-) => {
-  const notificationsDir = path.join("groups", groupId, "notifications");
-  confirmDirectoryExists(notificationsDir);
-
-  const notificationsUnsentDir = path.join(
-    "groups",
-    groupId,
-    "notifications",
-    "unsent"
-  );
-  confirmDirectoryExists(notificationsUnsentDir);
-
-  let notifications = [];
-  const notificationPath = path.join(notificationsUnsentDir, `${userId}.json`);
-
-  if (fs.existsSync(notificationPath)) {
-    try {
-      const fileContent = fs.readFileSync(notificationPath, "utf8");
-      if (fileContent.trim()) {
-        const data = JSON.parse(fileContent);
-        notifications = Array.isArray(data) ? data : [];
-      }
-    } catch (error) {
-      console.error("Error parsing notifications file:", error);
-      notifications = [];
-    }
-  }
-
-  if (action === "add") {
-    notifications.push(notification);
-  } else if (action === "remove") {
-    notifications = notifications.filter(
-      (n) =>
-        !(
-          n.itemId === notification.itemId &&
-          n.type === notification.type &&
-          n.user.id === notification.user.id
-        )
-    );
-  }
-
-  fs.writeFileSync(notificationPath, JSON.stringify(notifications, null, 2));
-};
-
-const constructNotificationData = (groupId, itemId, userId, type) => {
-  return {
-    itemId,
-    type,
-    user: {
-      id: userId,
-      name: getUsername(userId, groupId)
-    }
-  };
-};
-
 export default async (action, groupId, itemId, uploaderId, userId, type) => {
   if (type === "upload") {
     // Add to queue for all users in the group, other than the uploader
@@ -128,4 +68,64 @@ export default async (action, groupId, itemId, uploaderId, userId, type) => {
       );
     }
   }
+};
+
+const modifyNotificationsQueueFileForUser = (
+  action,
+  groupId,
+  userId,
+  notification
+) => {
+  const notificationsDir = path.join("groups", groupId, "notifications");
+  confirmDirectoryExists(notificationsDir);
+
+  const notificationsUnsentDir = path.join(
+    "groups",
+    groupId,
+    "notifications",
+    "unsent"
+  );
+  confirmDirectoryExists(notificationsUnsentDir);
+
+  let notifications = [];
+  const notificationPath = path.join(notificationsUnsentDir, `${userId}.json`);
+
+  if (fs.existsSync(notificationPath)) {
+    try {
+      const fileContent = fs.readFileSync(notificationPath, "utf8");
+      if (fileContent.trim()) {
+        const data = JSON.parse(fileContent);
+        notifications = Array.isArray(data) ? data : [];
+      }
+    } catch (error) {
+      console.error("Error parsing notifications file:", error);
+      notifications = [];
+    }
+  }
+
+  if (action === "add") {
+    notifications.push(notification);
+  } else if (action === "remove") {
+    notifications = notifications.filter(
+      (n) =>
+        !(
+          n.itemId === notification.itemId &&
+          n.type === notification.type &&
+          n.user.id === notification.user.id
+        )
+    );
+  }
+
+  fs.writeFileSync(notificationPath, JSON.stringify(notifications, null, 2));
+};
+
+const constructNotificationData = (groupId, itemId, userId, type) => {
+  return {
+    itemId,
+    type,
+    user: {
+      id: userId,
+      name: getUsername(userId, groupId)
+    }
+  };
 };
