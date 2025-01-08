@@ -743,7 +743,7 @@ app.get("/generate-qr-code/:groupId/:userId", async (req, res) => {
       });
     }
 
-    const url = `https://wave.leo.gd/${groupId}/${userId}`;
+    const url = `${process.env.CLIENT_URL}/${groupId}/${userId}`;
 
     const qrBuffer = await QRCode.toBuffer(url, {
       errorCorrectionLevel: "H",
@@ -834,7 +834,11 @@ app.get(
       // const notificationsToSend = generateNotifications(notifications);
       // res.json(notificationsToSend);
 
-      const notificationText = generateNotificationText(groupId, notifications);
+      const notificationText = generateNotificationText(
+        groupId,
+        userId,
+        notifications
+      );
       res.json(notificationText);
     } else {
       res.status(401).json({ error: "Unauthorized" });
