@@ -352,7 +352,7 @@ app.get("/media/:groupId", (req, res) => {
     }
 
     const addUsernames = (data) => {
-      const users = getGroupUsers(groupId);
+      const users = getGroupUsers(groupId, { includeDuplicates: true });
 
       return data.map((r) => {
         const user = users.find((u) => u.id === r.userId);
