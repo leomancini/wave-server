@@ -39,6 +39,8 @@ import modifyNotificationsQueue from "./functions/modifyNotificationsQueue.js";
 import getMetadataForItem from "./functions/getMetadataForItem.js";
 import getReactionsForItem from "./functions/getReactionsForItem.js";
 import getCommentsForItem from "./functions/getCommentsForItem.js";
+import getUnsentNotificationsForUser from "./functions/getUnsentNotificationsForUser.js";
+import generateNotificationText from "./functions/generateNotificationText.js";
 import sendSMS from "./functions/sendSMS.js";
 
 const storage = multer.diskStorage({
@@ -814,12 +816,28 @@ app.post("/mark-items-read/:groupId/:userId", async (req, res) => {
   }
 });
 
-app.get("/send-sms/:phoneNumber/:message/:smsAuthToken", (req, res) => {
-  // const { phoneNumber, message, smsAuthToken } = req.params;
-  // if (smsAuthToken === process.env.SMS_AUTH_TOKEN) {
-  //   sendSMS(phoneNumber, message);
-  //   res.json({ success: true });
-  // } else {
-  //   res.status(401).json({ error: "Unauthorized" });
-  // }
-});
+app.get(
+  "/send-sms-notifications/:groupId/:userId/:smsAuthToken",
+  (req, res) => {
+    const { groupId, userId, smsAuthToken } = req.params;
+
+    if (smsAuthToken === process.env.SMS_AUTH_TOKEN) {
+      const notifications = getUnsentNotificationsForUser(groupId, userId);
+
+      // const { phoneNumber, message, smsAuthToken } = req.params;
+      // if (smsAuthToken === process.env.SMS_AUTH_TOKEN) {
+      //   sendSMS(phoneNumber, message);
+      //   res.json({ success: true });
+      // } else {
+      //   res.status(401).json({ error: "Unauthorized" });
+      // }
+      // const notificationsToSend = generateNotifications(notifications);
+      // res.json(notificationsToSend);
+
+      const notificationText = generateNotificationText(groupId, notifications);
+      res.json(notificationText);
+    } else {
+      res.status(401).json({ error: "Unauthorized" });
+    }
+  }
+);
