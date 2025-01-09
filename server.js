@@ -777,6 +777,47 @@ app.get("/generate-qr-code/:groupId/:userId", async (req, res) => {
   }
 });
 
+app.post("/update-reaction-emojis/:groupId", async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { emojis } = req.body;
+
+    if (!Array.isArray(emojis)) {
+      return res.status(400).json({
+        error: "Emojis must be an array"
+      });
+    }
+
+    if (emojis.length === 0) {
+      return res.status(400).json({
+        error: "Emojis array cannot be empty"
+      });
+    }
+
+    const groupsDir = path.join("groups", groupId);
+    confirmDirectoryExists(groupsDir);
+
+    const configPath = path.join(groupsDir, "config.json");
+    let config = {};
+    if (fs.existsSync(configPath)) {
+      config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    }
+    config.reactions = emojis;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    res.json({
+      success: true,
+      message: "Successfully updated reaction emojis",
+      emojis
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to update reaction emojis",
+      details: error.message
+    });
+  }
+});
+
 app.post("/mark-items-read/:groupId/:userId", async (req, res) => {
   try {
     const { groupId, userId } = req.params;
