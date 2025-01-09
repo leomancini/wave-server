@@ -5,8 +5,20 @@ import fs from "fs";
 import sharp from "sharp";
 import QRCode from "qrcode";
 import dotenv from "dotenv";
+import webpush from "web-push";
 
 dotenv.config();
+
+const vapidKeys = {
+  publicKey: process.env.VAPID_PUBLIC_KEY,
+  privateKey: process.env.VAPID_PRIVATE_KEY
+};
+
+webpush.setVapidDetails(
+  "mailto:" + process.env.VAPID_CONTACT_EMAIL,
+  vapidKeys.publicKey,
+  vapidKeys.privateKey
+);
 
 const app = express();
 const port = 3107;
@@ -824,6 +836,8 @@ app.get(
     if (smsAuthToken === process.env.SMS_AUTH_TOKEN) {
       const notifications = getUnsentNotificationsForUser(groupId, userId);
 
+      // TODO: Check if user has SMS notifications enabled
+
       // const { phoneNumber, message, smsAuthToken } = req.params;
       // if (smsAuthToken === process.env.SMS_AUTH_TOKEN) {
       //   sendSMS(phoneNumber, message);
@@ -845,3 +859,290 @@ app.get(
     }
   }
 );
+
+app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const subscription = req.body;
+
+    const subscriptionsDir = path.join(
+      "groups",
+      groupId,
+      "notifications",
+      "subscriptions"
+    );
+    const subscriptionsPath = path.join(subscriptionsDir, "web-push.json");
+
+    confirmDirectoryExists(subscriptionsDir);
+
+    // Create/load existing subscriptions
+    let subscriptions = {};
+    if (fs.existsSync(subscriptionsPath)) {
+      subscriptions = JSON.parse(fs.readFileSync(subscriptionsPath, "utf8"));
+    }
+
+    // Store subscription with user info
+    subscriptions[userId] = {
+      subscription,
+      timestamp: Date.now()
+    };
+
+    fs.writeFileSync(subscriptionsPath, JSON.stringify(subscriptions, null, 2));
+
+    res.json({ success: true, isSubscribed: true });
+  } catch (error) {
+    console.error("Error saving subscription:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/web-push/remove-subscription/:groupId/:userId", async (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const subscriptionsPath = path.join(
+      "groups",
+      groupId,
+      "notifications",
+      "subscriptions",
+      "web-push.json"
+    );
+
+    if (fs.existsSync(subscriptionsPath)) {
+      const subscriptions = JSON.parse(
+        fs.readFileSync(subscriptionsPath, "utf8")
+      );
+      delete subscriptions[userId];
+      fs.writeFileSync(
+        subscriptionsPath,
+        JSON.stringify(subscriptions, null, 2)
+      );
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Error removing subscription:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/web-push/send-test/:groupId/:userId", async (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const subscriptionsPath = path.join(
+      "groups",
+      groupId,
+      "notifications",
+      "subscriptions",
+      "web-push.json"
+    );
+
+    if (!fs.existsSync(subscriptionsPath)) {
+      return res.status(404).json({
+        success: false,
+        error: "No subscriptions found"
+      });
+    }
+
+    const subscriptions = JSON.parse(
+      fs.readFileSync(subscriptionsPath, "utf8")
+    );
+    const userSubscription = subscriptions[userId];
+
+    if (!userSubscription) {
+      return res.status(404).json({
+        success: false,
+        error: "User subscription not found"
+      });
+    }
+
+    const payload = JSON.stringify({
+      title: "Test Notification",
+      body: "This is a test notification!",
+      timestamp: Date.now()
+    });
+
+    try {
+      await webpush.sendNotification(userSubscription.subscription, payload);
+    } catch (error) {
+      if (
+        error.statusCode === 410 ||
+        error.body.includes("unsubscribed or expired")
+      ) {
+        // Remove expired subscription
+        delete subscriptions[userId];
+        fs.writeFileSync(
+          subscriptionsPath,
+          JSON.stringify(subscriptions, null, 2)
+        );
+
+        return res.status(400).json({
+          success: false,
+          error: "Subscription has expired",
+          isExpired: true
+        });
+      }
+      throw error; // Re-throw other errors
+    }
+
+    res.json({ success: true, message: "Test notification sent" });
+  } catch (error) {
+    console.error("Error sending test notification:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Add a helper function to validate and clean subscriptions
+const validateSubscription = async (subscription) => {
+  try {
+    const payload = JSON.stringify({
+      title: "Subscription Validation",
+      body: "Validating subscription status",
+      timestamp: Date.now()
+    });
+    await webpush.sendNotification(subscription, payload);
+    return true;
+  } catch (error) {
+    if (
+      error.statusCode === 410 ||
+      error.body.includes("unsubscribed or expired")
+    ) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+// Add a new endpoint to validate subscriptions
+app.post("/web-push/validate-subscriptions/:groupId", async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const subscriptionsPath = path.join(
+      "groups",
+      groupId,
+      "notifications",
+      "subscriptions",
+      "web-push.json"
+    );
+
+    if (!fs.existsSync(subscriptionsPath)) {
+      return res.json({ success: true, cleaned: 0 });
+    }
+
+    const subscriptions = JSON.parse(
+      fs.readFileSync(subscriptionsPath, "utf8")
+    );
+    const userIds = Object.keys(subscriptions);
+    let cleaned = 0;
+
+    for (const userId of userIds) {
+      const isValid = await validateSubscription(
+        subscriptions[userId].subscription
+      );
+      if (!isValid) {
+        delete subscriptions[userId];
+        cleaned++;
+      }
+    }
+
+    if (cleaned > 0) {
+      fs.writeFileSync(
+        subscriptionsPath,
+        JSON.stringify(subscriptions, null, 2)
+      );
+    }
+
+    res.json({ success: true, cleaned });
+  } catch (error) {
+    console.error("Error validating subscriptions:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/web-push/renew-subscription/:groupId/:userId", async (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const subscription = req.body;
+
+    // Validate input
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid subscription object"
+      });
+    }
+
+    const subscriptionsDir = path.join(
+      "groups",
+      groupId,
+      "notifications",
+      "subscriptions"
+    );
+    const subscriptionsPath = path.join(subscriptionsDir, "web-push.json");
+
+    confirmDirectoryExists(subscriptionsDir);
+
+    // Load existing subscriptions
+    let subscriptions = {};
+    if (fs.existsSync(subscriptionsPath)) {
+      try {
+        const fileContent = fs.readFileSync(subscriptionsPath, "utf8");
+        if (fileContent.trim()) {
+          subscriptions = JSON.parse(fileContent);
+        }
+      } catch (parseError) {
+        console.error("Error parsing subscriptions file:", parseError);
+        // If file is corrupted, start fresh
+        subscriptions = {};
+      }
+    }
+
+    // Validate the new subscription
+    try {
+      const testPayload = JSON.stringify({
+        title: "Subscription Renewal",
+        body: "Validating renewed subscription",
+        timestamp: Date.now()
+      });
+      await webpush.sendNotification(subscription, testPayload);
+    } catch (error) {
+      if (
+        error.statusCode === 410 ||
+        error.body.includes("unsubscribed or expired")
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "New subscription is invalid",
+          isExpired: true
+        });
+      }
+      throw error;
+    }
+
+    // Update subscription with new data and timestamp
+    subscriptions[userId] = {
+      subscription,
+      timestamp: Date.now(),
+      renewalCount: (subscriptions[userId]?.renewalCount || 0) + 1,
+      lastRenewal: new Date().toISOString()
+    };
+
+    // Save updated subscriptions
+    fs.writeFileSync(subscriptionsPath, JSON.stringify(subscriptions, null, 2));
+
+    // Send success response with subscription info
+    res.json({
+      success: true,
+      message: "Subscription renewed successfully",
+      renewalCount: subscriptions[userId].renewalCount,
+      lastRenewal: subscriptions[userId].lastRenewal
+    });
+  } catch (error) {
+    console.error("Error renewing subscription:", error);
+    console.error("Request body:", req.body);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      details: "Failed to renew push notification subscription"
+    });
+  }
+});
