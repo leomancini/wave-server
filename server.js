@@ -6,6 +6,8 @@ import sharp from "sharp";
 import QRCode from "qrcode";
 import dotenv from "dotenv";
 import webpush from "web-push";
+import { Worker } from "worker_threads";
+import { cpus } from "os";
 
 dotenv.config();
 
@@ -55,6 +57,59 @@ import getUnsentNotificationsForUser from "./functions/getUnsentNotificationsFor
 import generateNotificationText from "./functions/generateNotificationText.js";
 import sendSMS from "./functions/sendSMS.js";
 
+// Create a worker pool for image processing
+const workerPool = new Set();
+const maxWorkers = Math.max(1, cpus().length - 1); // Leave one CPU core free
+
+const processImage = async (inputPath, outputPath, options) => {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+      `
+      const sharp = require('sharp');
+      const { parentPort } = require('worker_threads');
+      
+      parentPort.on('message', async ({ inputPath, outputPath, options }) => {
+        try {
+          await sharp(inputPath)
+            .rotate()
+            .resize(options.width, options.height, {
+              fit: options.fit,
+              withoutEnlargement: options.withoutEnlargement
+            })
+            .jpeg({ quality: options.quality })
+            .toFile(outputPath);
+          
+          parentPort.postMessage('done');
+        } catch (error) {
+          parentPort.postMessage({ error: error.message });
+        }
+      });
+    `,
+      { eval: true }
+    );
+
+    worker.on("message", (result) => {
+      workerPool.delete(worker);
+      worker.terminate();
+      if (result.error) {
+        reject(new Error(result.error));
+      } else {
+        resolve();
+      }
+    });
+
+    worker.on("error", (error) => {
+      workerPool.delete(worker);
+      worker.terminate();
+      reject(error);
+    });
+
+    workerPool.add(worker);
+    worker.postMessage({ inputPath, outputPath, options });
+  });
+};
+
+// Configure multer with optimized settings
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const filename = file.originalname;
@@ -70,6 +125,10 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+    files: 10 // Max 10 files per upload
+  },
   fileFilter: (req, file, cb) => {
     const filename = file.originalname;
     const groupId = filename.split("-")[0];
@@ -128,43 +187,104 @@ const cleanItemId = (itemId) => {
 //   res.json(result);
 // });
 
+// Add this retry utility at the top with other imports
+const retry = async (fn, retries = 3, delay = 1000) => {
+  try {
+    return await fn();
+  } catch (error) {
+    if (retries === 0) throw error;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    return retry(fn, retries - 1, delay * 2);
+  }
+};
+
+// Add this helper function if not already present
+const waitForFile = async (filePath, maxAttempts = 5, delay = 1000) => {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      await fs.promises.access(filePath, fs.constants.R_OK);
+      const stats = await fs.promises.stat(filePath);
+      if (stats.size > 0) {
+        return true;
+      }
+    } catch (error) {
+      if (i === maxAttempts - 1) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  throw new Error(
+    `File not available after ${maxAttempts} attempts: ${filePath}`
+  );
+};
+
+// Update the upload endpoint's file processing
 app.post("/upload", upload.array("media", 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: "No media files provided!" });
     }
 
-    for (const file of req.files) {
+    // Process files in parallel with worker pool
+    const processPromises = req.files.map(async (file) => {
       const uploaderId = req.body.uploaderId;
-      const newFilename = `${Date.now()}-${uploaderId}-${Math.floor(
-        Math.random() * 10000000000
-      )}.jpg`;
+      const newFilename = `${req.body.itemId.replace("-new-upload", "")}.jpg`;
+
+      console.log(newFilename);
       const itemId = path.parse(newFilename).name;
       const newPath = path.join(path.dirname(file.path), newFilename);
 
       if (file.mimetype.startsWith("image/")) {
+        // Get dimensions before processing
         const dimensions = await getDimensions(file.path);
 
-        await sharp(file.path)
-          .rotate()
-          .resize(1920, 1080, {
-            fit: "inside",
-            withoutEnlargement: true
-          })
-          .jpeg({ quality: 100 })
-          .toFile(newPath);
+        // Wait for available worker in pool
+        while (workerPool.size >= maxWorkers) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
 
+        // Process image with worker
+        await processImage(file.path, newPath, {
+          width: 1920,
+          height: 1080,
+          fit: "inside",
+          withoutEnlargement: true,
+          quality: 85
+        });
+
+        // Clean up original file
         fs.unlinkSync(file.path);
 
         const groupId = file.originalname.split("-")[0];
-        await saveMetadata(groupId, file, itemId, uploaderId, dimensions);
 
-        await generateThumbnail(groupId, newPath, itemId);
+        // Process metadata and thumbnail with retries
+        try {
+          await Promise.all([
+            saveMetadata(groupId, file, itemId, uploaderId, dimensions),
+            // Add retry logic for thumbnail generation
+            retry(async () => {
+              // Verify the source file exists and is readable
+              await fs.promises.access(newPath, fs.constants.R_OK);
+              // Generate thumbnail with increased timeout
+              await generateThumbnail(groupId, newPath, itemId);
+              // Verify thumbnail was created
+              const thumbnailPath = path.join(
+                "groups",
+                groupId,
+                "thumbnails",
+                `${itemId}.jpg`
+              );
+              await fs.promises.access(thumbnailPath, fs.constants.R_OK);
+            }),
+            updateUnreadItems(groupId, itemId, uploaderId).catch((err) => {
+              console.error("Error updating unread items:", err);
+            })
+          ]);
+        } catch (error) {
+          console.error(`Error processing file ${newFilename}:`, error);
+          throw new Error(`Failed to process ${newFilename}: ${error.message}`);
+        }
 
-        updateUnreadItems(groupId, itemId, uploaderId).catch((err) => {
-          console.error("Error updating unread items:", err);
-        });
-
+        // Queue notification after successful processing
         modifyNotificationsQueue(
           "add",
           groupId,
@@ -177,12 +297,16 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
         file.filename = newFilename;
         file.path = newPath;
       }
-    }
+    });
+
+    // Wait for all files to be processed
+    await Promise.all(processPromises);
 
     res.json({
       message: `Successfully uploaded ${req.files.length} media file${
         req.files.length > 1 ? "s" : ""
-      }!`
+      }!`,
+      success: true
     });
   } catch (error) {
     console.error("Upload error:", error);
@@ -1185,5 +1309,48 @@ app.post("/web-push/renew-subscription/:groupId/:userId", async (req, res) => {
       error: error.message,
       details: "Failed to renew push notification subscription"
     });
+  }
+});
+
+// Update the media endpoint
+app.get("/media/:groupId/:filename", async (req, res) => {
+  try {
+    const { groupId, filename } = req.params;
+    const filePath = path.join("groups", groupId, "media", filename);
+
+    // Wait for file to be fully written and accessible
+    try {
+      await retry(
+        async () => {
+          await waitForFile(filePath);
+        },
+        3,
+        1000
+      );
+    } catch (error) {
+      console.error(`File access error for ${filePath}:`, error);
+      return res.status(404).send("File not found or not ready");
+    }
+
+    // Set appropriate headers
+    res.setHeader("Cache-Control", "public, max-age=31536000"); // 1 year cache
+    res.setHeader("Content-Type", "image/jpeg");
+
+    // Stream the file with error handling
+    const stream = fs.createReadStream(filePath);
+
+    stream.on("error", (error) => {
+      console.error(`Streaming error for ${filePath}:`, error);
+      if (!res.headersSent) {
+        res.status(500).send("Error streaming file");
+      }
+    });
+
+    stream.pipe(res);
+  } catch (error) {
+    console.error("Media endpoint error:", error);
+    if (!res.headersSent) {
+      res.status(500).send("Internal server error");
+    }
   }
 });
