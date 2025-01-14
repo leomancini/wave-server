@@ -1058,6 +1058,8 @@ app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
       });
     }
 
+    console.log(subscription);
+
     const subscriptionsDir = path.join(
       "groups",
       groupId,
