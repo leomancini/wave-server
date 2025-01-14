@@ -1074,44 +1074,21 @@ app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
       subscriptions = JSON.parse(fs.readFileSync(subscriptionsPath, "utf8"));
     }
 
-    // Initialize user's subscriptions if needed
-    if (!subscriptions[userId]) {
-      subscriptions[userId] = {
-        subscriptions: []
-      };
-    }
-
-    // Check if this subscription endpoint already exists
-    const existingIndex = subscriptions[userId].subscriptions.findIndex(
-      (sub) => sub.subscription.endpoint === subscription.endpoint
-    );
-
-    if (existingIndex !== -1) {
-      // Update existing subscription
-      subscriptions[userId].subscriptions[existingIndex] = {
-        subscription,
-        timestamp: Date.now(),
-        renewalCount:
-          (subscriptions[userId].subscriptions[existingIndex].renewalCount ||
-            0) + 1,
-        lastRenewal: new Date().toISOString()
-      };
-    } else {
-      // Add new subscription
-      subscriptions[userId].subscriptions.push({
-        subscription,
-        timestamp: Date.now(),
-        renewalCount: 0,
-        lastRenewal: new Date().toISOString()
-      });
-    }
+    // Save or update the user's subscription
+    subscriptions[userId] = {
+      subscription,
+      timestamp: Date.now(),
+      lastRenewal: new Date().toISOString(),
+      renewalCount: subscriptions[userId]?.renewalCount
+        ? subscriptions[userId].renewalCount + 1
+        : 0
+    };
 
     fs.writeFileSync(subscriptionsPath, JSON.stringify(subscriptions, null, 2));
 
     res.json({
       success: true,
-      isSubscribed: true,
-      deviceCount: subscriptions[userId].subscriptions.length
+      isSubscribed: true
     });
   } catch (error) {
     console.error("Error saving subscription:", error);
@@ -1122,7 +1099,6 @@ app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
 app.post("/web-push/remove-subscription/:groupId/:userId", async (req, res) => {
   try {
     const { groupId, userId } = req.params;
-    const subscription = req.body;
     const subscriptionsPath = path.join(
       "groups",
       groupId,
@@ -1135,25 +1111,8 @@ app.post("/web-push/remove-subscription/:groupId/:userId", async (req, res) => {
       const subscriptions = JSON.parse(
         fs.readFileSync(subscriptionsPath, "utf8")
       );
-
       if (subscriptions[userId]) {
-        if (subscription && subscription.endpoint) {
-          // Remove specific subscription
-          subscriptions[userId].subscriptions = subscriptions[
-            userId
-          ].subscriptions.filter(
-            (sub) => sub.subscription.endpoint !== subscription.endpoint
-          );
-
-          // Remove user entry if no subscriptions left
-          if (subscriptions[userId].subscriptions.length === 0) {
-            delete subscriptions[userId];
-          }
-        } else {
-          // Remove all subscriptions for user if no specific subscription provided
-          delete subscriptions[userId];
-        }
-
+        delete subscriptions[userId];
         fs.writeFileSync(
           subscriptionsPath,
           JSON.stringify(subscriptions, null, 2)
@@ -1189,12 +1148,12 @@ app.get("/web-push/send-test/:groupId/:userId", async (req, res) => {
     const subscriptions = JSON.parse(
       fs.readFileSync(subscriptionsPath, "utf8")
     );
-    const userSubscriptions = subscriptions[userId];
+    const userSubscription = subscriptions[userId];
 
-    if (!userSubscriptions || !userSubscriptions.subscriptions.length) {
+    if (!userSubscription) {
       return res.status(404).json({
         success: false,
-        error: "User subscriptions not found"
+        error: "User subscription not found"
       });
     }
 
@@ -1204,57 +1163,31 @@ app.get("/web-push/send-test/:groupId/:userId", async (req, res) => {
       timestamp: Date.now()
     });
 
-    const results = await Promise.allSettled(
-      userSubscriptions.subscriptions.map(async (sub) => {
-        try {
-          await webpush.sendNotification(sub.subscription, payload);
-          return { success: true, endpoint: sub.subscription.endpoint };
-        } catch (error) {
-          if (
-            error.statusCode === 410 ||
-            error.body?.includes("unsubscribed or expired")
-          ) {
-            return {
-              success: false,
-              endpoint: sub.subscription.endpoint,
-              expired: true
-            };
-          }
-          throw error;
-        }
-      })
-    );
-
-    // Remove expired subscriptions
-    const expiredEndpoints = results
-      .filter((r) => r.value?.expired)
-      .map((r) => r.value.endpoint);
-
-    if (expiredEndpoints.length > 0) {
-      userSubscriptions.subscriptions = userSubscriptions.subscriptions.filter(
-        (sub) => !expiredEndpoints.includes(sub.subscription.endpoint)
-      );
-
-      if (userSubscriptions.subscriptions.length === 0) {
+    try {
+      await webpush.sendNotification(userSubscription.subscription, payload);
+      res.json({
+        success: true,
+        message: "Test notification sent successfully"
+      });
+    } catch (error) {
+      if (
+        error.statusCode === 410 ||
+        error.body?.includes("unsubscribed or expired")
+      ) {
+        // Remove expired subscription
         delete subscriptions[userId];
+        fs.writeFileSync(
+          subscriptionsPath,
+          JSON.stringify(subscriptions, null, 2)
+        );
+        return res.status(410).json({
+          success: false,
+          error: "Subscription has expired",
+          isExpired: true
+        });
       }
-
-      fs.writeFileSync(
-        subscriptionsPath,
-        JSON.stringify(subscriptions, null, 2)
-      );
+      throw error;
     }
-
-    const successCount = results.filter((r) => r.value?.success).length;
-    const expiredCount = expiredEndpoints.length;
-
-    res.json({
-      success: true,
-      message: `Test notification sent to ${successCount} device(s)`,
-      successCount,
-      expiredCount,
-      remainingDevices: userSubscriptions.subscriptions.length
-    });
   } catch (error) {
     console.error("Error sending test notification:", error);
     res.status(500).json({ success: false, error: error.message });
@@ -1305,26 +1238,20 @@ app.post("/web-push/validate-subscriptions/:groupId", async (req, res) => {
     let totalValid = 0;
 
     for (const userId of userIds) {
-      const validSubscriptions = [];
-      for (const sub of subscriptions[userId].subscriptions) {
-        try {
-          const isValid = await validateSubscription(sub.subscription);
-          if (isValid) {
-            validSubscriptions.push(sub);
-            totalValid++;
-          } else {
-            cleaned++;
-          }
-        } catch (error) {
-          console.error("Error validating subscription:", error);
+      try {
+        const isValid = await validateSubscription(
+          subscriptions[userId].subscription
+        );
+        if (isValid) {
+          totalValid++;
+        } else {
+          delete subscriptions[userId];
           cleaned++;
         }
-      }
-
-      if (validSubscriptions.length === 0) {
+      } catch (error) {
+        console.error("Error validating subscription:", error);
         delete subscriptions[userId];
-      } else {
-        subscriptions[userId].subscriptions = validSubscriptions;
+        cleaned++;
       }
     }
 
@@ -1363,63 +1290,52 @@ app
       if (!fs.existsSync(subscriptionsPath)) {
         return res.json({
           success: true,
-          isSubscribed: false,
-          deviceCount: 0
+          isSubscribed: false
         });
       }
 
       const subscriptions = JSON.parse(
         fs.readFileSync(subscriptionsPath, "utf8")
       );
-      const userSubscriptions = subscriptions[userId];
+      const userSubscription = subscriptions[userId];
 
-      if (!userSubscriptions || !userSubscriptions.subscriptions.length) {
+      if (!userSubscription) {
         return res.json({
           success: true,
-          isSubscribed: false,
-          deviceCount: 0
+          isSubscribed: false
         });
       }
 
-      // Validate all subscriptions
-      const validSubscriptions = [];
-      for (const sub of userSubscriptions.subscriptions) {
-        try {
-          const isValid = await validateSubscription(sub.subscription);
-          if (isValid) {
-            validSubscriptions.push(sub);
-          }
-        } catch (error) {
-          console.error("Error validating subscription:", error);
-        }
-      }
-
-      // Update storage if any subscriptions were invalid
-      if (
-        validSubscriptions.length !== userSubscriptions.subscriptions.length
-      ) {
-        if (validSubscriptions.length === 0) {
-          delete subscriptions[userId];
-        } else {
-          subscriptions[userId].subscriptions = validSubscriptions;
-        }
-        fs.writeFileSync(
-          subscriptionsPath,
-          JSON.stringify(subscriptions, null, 2)
+      try {
+        const isValid = await validateSubscription(
+          userSubscription.subscription
         );
-      }
+        if (!isValid) {
+          delete subscriptions[userId];
+          fs.writeFileSync(
+            subscriptionsPath,
+            JSON.stringify(subscriptions, null, 2)
+          );
+          return res.json({
+            success: true,
+            isSubscribed: false
+          });
+        }
 
-      res.json({
-        success: true,
-        isSubscribed: validSubscriptions.length > 0,
-        deviceCount: validSubscriptions.length,
-        subscriptions: validSubscriptions.map((sub) => ({
-          endpoint: sub.subscription.endpoint,
-          timestamp: sub.timestamp,
-          renewalCount: sub.renewalCount,
-          lastRenewal: sub.lastRenewal
-        }))
-      });
+        return res.json({
+          success: true,
+          isSubscribed: true,
+          subscription: {
+            endpoint: userSubscription.subscription.endpoint,
+            timestamp: userSubscription.timestamp,
+            renewalCount: userSubscription.renewalCount,
+            lastRenewal: userSubscription.lastRenewal
+          }
+        });
+      } catch (error) {
+        console.error("Error validating subscription:", error);
+        return res.status(500).json({ success: false, error: error.message });
+      }
     } catch (error) {
       console.error("Error checking subscription:", error);
       res.status(500).json({ success: false, error: error.message });
@@ -1439,74 +1355,54 @@ app
       if (!fs.existsSync(subscriptionsPath)) {
         return res.json({
           success: true,
-          isSubscribed: false,
-          deviceCount: 0
+          isSubscribed: false
         });
       }
 
       const subscriptions = JSON.parse(
         fs.readFileSync(subscriptionsPath, "utf8")
       );
-      const userSubscriptions = subscriptions[userId];
+      const userSubscription = subscriptions[userId];
 
-      if (!userSubscriptions || !userSubscriptions.subscriptions.length) {
+      if (!userSubscription) {
         return res.json({
           success: true,
-          isSubscribed: false,
-          deviceCount: 0
+          isSubscribed: false
         });
       }
 
-      // If subscription provided in body, check only that one
       if (req.body && req.body.endpoint) {
-        const matchingSubscription = userSubscriptions.subscriptions.find(
-          (sub) => sub.subscription.endpoint === req.body.endpoint
-        );
-
-        if (!matchingSubscription) {
+        if (userSubscription.subscription.endpoint !== req.body.endpoint) {
           return res.json({
             success: true,
-            isSubscribed: false,
-            deviceCount: userSubscriptions.subscriptions.length
+            isSubscribed: false
           });
         }
 
         try {
           const isValid = await validateSubscription(
-            matchingSubscription.subscription
+            userSubscription.subscription
           );
           if (!isValid) {
-            // Remove invalid subscription
-            userSubscriptions.subscriptions =
-              userSubscriptions.subscriptions.filter(
-                (sub) => sub.subscription.endpoint !== req.body.endpoint
-              );
-
-            if (userSubscriptions.subscriptions.length === 0) {
-              delete subscriptions[userId];
-            }
-
+            delete subscriptions[userId];
             fs.writeFileSync(
               subscriptionsPath,
               JSON.stringify(subscriptions, null, 2)
             );
-
             return res.json({
               success: true,
-              isSubscribed: false,
-              deviceCount: userSubscriptions.subscriptions.length
+              isSubscribed: false
             });
           }
 
           return res.json({
             success: true,
             isSubscribed: true,
-            deviceCount: userSubscriptions.subscriptions.length,
             subscription: {
-              endpoint: matchingSubscription.subscription.endpoint,
-              timestamp: matchingSubscription.timestamp,
-              renewalCount: matchingSubscription.renewalCount,
-              lastRenewal: matchingSubscription.lastRenewal
+              endpoint: userSubscription.subscription.endpoint,
+              timestamp: userSubscription.timestamp,
+              renewalCount: userSubscription.renewalCount,
+              lastRenewal: userSubscription.lastRenewal
             }
           });
         } catch (error) {
@@ -1515,45 +1411,36 @@ app
         }
       }
 
-      // If no specific subscription provided, validate all
-      const validSubscriptions = [];
-      for (const sub of userSubscriptions.subscriptions) {
-        try {
-          const isValid = await validateSubscription(sub.subscription);
-          if (isValid) {
-            validSubscriptions.push(sub);
-          }
-        } catch (error) {
-          console.error("Error validating subscription:", error);
-        }
-      }
-
-      // Update storage if any subscriptions were invalid
-      if (
-        validSubscriptions.length !== userSubscriptions.subscriptions.length
-      ) {
-        if (validSubscriptions.length === 0) {
-          delete subscriptions[userId];
-        } else {
-          subscriptions[userId].subscriptions = validSubscriptions;
-        }
-        fs.writeFileSync(
-          subscriptionsPath,
-          JSON.stringify(subscriptions, null, 2)
+      try {
+        const isValid = await validateSubscription(
+          userSubscription.subscription
         );
-      }
+        if (!isValid) {
+          delete subscriptions[userId];
+          fs.writeFileSync(
+            subscriptionsPath,
+            JSON.stringify(subscriptions, null, 2)
+          );
+          return res.json({
+            success: true,
+            isSubscribed: false
+          });
+        }
 
-      res.json({
-        success: true,
-        isSubscribed: validSubscriptions.length > 0,
-        deviceCount: validSubscriptions.length,
-        subscriptions: validSubscriptions.map((sub) => ({
-          endpoint: sub.subscription.endpoint,
-          timestamp: sub.timestamp,
-          renewalCount: sub.renewalCount,
-          lastRenewal: sub.lastRenewal
-        }))
-      });
+        return res.json({
+          success: true,
+          isSubscribed: true,
+          subscription: {
+            endpoint: userSubscription.subscription.endpoint,
+            timestamp: userSubscription.timestamp,
+            renewalCount: userSubscription.renewalCount,
+            lastRenewal: userSubscription.lastRenewal
+          }
+        });
+      } catch (error) {
+        console.error("Error validating subscription:", error);
+        return res.status(500).json({ success: false, error: error.message });
+      }
     } catch (error) {
       console.error("Error checking subscription:", error);
       res.status(500).json({ success: false, error: error.message });
