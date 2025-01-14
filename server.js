@@ -743,6 +743,7 @@ app.get("/validate-group-user/:groupId/:userId", (req, res) => {
       id: user?.id,
       name: user?.name,
       notificationPreference: user?.notificationPreference,
+      phoneNumber: user?.phoneNumber,
       error: userExists ? null : "User not found in group"
     });
   } catch (error) {
@@ -1527,6 +1528,48 @@ app.post("/users/:groupId/:userId/notification-preference", (req, res) => {
     });
   } catch (error) {
     console.error("Error updating notification preferences:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post("/users/:groupId/:userId/phone-number", (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const { phoneNumber } = req.body;
+
+    const users = getGroupUsers(groupId);
+    const userIndex = users.findIndex((user) => user.id === userId);
+    if (userIndex === -1) {
+      return res.status(404).json({
+        error: "User not found"
+      });
+    }
+
+    const identitiesPath = path.join(
+      "groups",
+      groupId,
+      "users",
+      "identities.json"
+    );
+    const identities = JSON.parse(fs.readFileSync(identitiesPath, "utf8"));
+
+    if (!phoneNumber) {
+      delete identities[userIndex].phoneNumber;
+    } else {
+      identities[userIndex].phoneNumber = phoneNumber;
+    }
+
+    fs.writeFileSync(identitiesPath, JSON.stringify(identities, null, 2));
+
+    res.json({
+      success: true,
+      user: identities[userIndex]
+    });
+  } catch (error) {
+    console.error("Error updating phone number:", error);
     res.status(500).json({
       success: false,
       error: error.message
