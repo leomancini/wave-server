@@ -220,6 +220,59 @@ const waitForFile = async (filePath, maxAttempts = 5, delay = 1000) => {
   );
 };
 
+const processUploadedFile = async (
+  file,
+  groupId,
+  itemId,
+  uploaderId,
+  newFilename,
+  newPath
+) => {
+  const dimensions = await getDimensions(file.path);
+
+  while (workerPool.size >= maxWorkers) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  await processImage(file.path, newPath, {
+    width: 1920,
+    height: 1080,
+    fit: "inside",
+    withoutEnlargement: true,
+    quality: 85
+  });
+
+  fs.unlinkSync(file.path);
+
+  try {
+    await Promise.all([
+      saveMetadata(groupId, file, itemId, uploaderId, dimensions),
+      retry(async () => {
+        await waitForFile(newPath);
+        await generateThumbnail(groupId, newPath, itemId);
+        const thumbnailPath = path.join(
+          "groups",
+          groupId,
+          "thumbnails",
+          `${itemId}.jpg`
+        );
+        await waitForFile(thumbnailPath);
+      }),
+      updateUnreadItems(groupId, itemId, uploaderId).catch((err) => {
+        console.error("Error updating unread items:", err);
+      })
+    ]);
+  } catch (error) {
+    console.error(`Error processing file ${newFilename}:`, error);
+    throw new Error(`Failed to process ${newFilename}: ${error.message}`);
+  }
+
+  modifyNotificationsQueue("add", groupId, itemId, uploaderId, null, "upload");
+
+  file.filename = newFilename;
+  file.path = newPath;
+};
+
 app.post("/upload", upload.array("media", 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
@@ -234,56 +287,14 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
       const newPath = path.join(path.dirname(file.path), newFilename);
 
       if (file.mimetype.startsWith("image/")) {
-        const dimensions = await getDimensions(file.path);
-
-        while (workerPool.size >= maxWorkers) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-
-        await processImage(file.path, newPath, {
-          width: 1920,
-          height: 1080,
-          fit: "inside",
-          withoutEnlargement: true,
-          quality: 85
-        });
-
-        fs.unlinkSync(file.path);
-
-        try {
-          await Promise.all([
-            saveMetadata(groupId, file, itemId, uploaderId, dimensions),
-            retry(async () => {
-              await waitForFile(newPath);
-              await generateThumbnail(groupId, newPath, itemId);
-              const thumbnailPath = path.join(
-                "groups",
-                groupId,
-                "thumbnails",
-                `${itemId}.jpg`
-              );
-              await waitForFile(thumbnailPath);
-            }),
-            updateUnreadItems(groupId, itemId, uploaderId).catch((err) => {
-              console.error("Error updating unread items:", err);
-            })
-          ]);
-        } catch (error) {
-          console.error(`Error processing file ${newFilename}:`, error);
-          throw new Error(`Failed to process ${newFilename}: ${error.message}`);
-        }
-
-        modifyNotificationsQueue(
-          "add",
+        await processUploadedFile(
+          file,
           groupId,
           itemId,
           uploaderId,
-          null,
-          "upload"
+          newFilename,
+          newPath
         );
-
-        file.filename = newFilename;
-        file.path = newPath;
       }
     });
 
