@@ -10,23 +10,24 @@ const generateThumbnail = async (groupId, originalPath, itemId) => {
     fs.mkdirSync(thumbnailsDir, { recursive: true });
   }
 
-  // Add timeout and better error handling
   try {
+    const { width, height } = await sharp(originalPath).metadata();
+    const aspectRatio = width / height;
+
     await sharp(originalPath, {
       failOnError: true,
-      timeout: 30000 // 30 second timeout
+      timeout: 30000
     })
-      .resize(300, 300, {
-        fit: "cover",
+      .resize(100, Math.round(100 / aspectRatio), {
+        fit: "contain",
         position: "centre"
       })
       .jpeg({
-        quality: 70,
+        quality: 25,
         progressive: true
       })
       .toFile(thumbnailPath);
 
-    // Verify the thumbnail was created successfully
     const stats = await fs.promises.stat(thumbnailPath);
     if (stats.size === 0) {
       throw new Error("Generated thumbnail is empty");
@@ -35,7 +36,6 @@ const generateThumbnail = async (groupId, originalPath, itemId) => {
     return thumbnailPath;
   } catch (error) {
     console.error(`Error generating thumbnail for ${itemId}:`, error);
-    // Clean up failed thumbnail if it exists
     if (fs.existsSync(thumbnailPath)) {
       fs.unlinkSync(thumbnailPath);
     }
