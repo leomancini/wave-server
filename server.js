@@ -56,6 +56,7 @@ import generateThumbnail from "./functions/generateThumbnail.js";
 import updateUnreadItems from "./functions/updateUnreadItems.js";
 import getDimensions from "./functions/getDimensions.js";
 import getGroupUsers from "./functions/getGroupUsers.js";
+import getUser from "./functions/getUser.js";
 import generateUserId from "./functions/generateUserId.js";
 import modifyNotificationsQueue from "./functions/modifyNotificationsQueue.js";
 import getMetadataForItem from "./functions/getMetadataForItem.js";
@@ -64,6 +65,7 @@ import getCommentsForItem from "./functions/getCommentsForItem.js";
 import getUnsentNotificationsForUser from "./functions/getUnsentNotificationsForUser.js";
 import generateNotificationText from "./functions/generateNotificationText.js";
 import sendSMS from "./functions/sendSMS.js";
+import saveData from "./functions/saveData.js";
 
 // Create a worker pool for image processing
 const workerPool = new Set();
@@ -1448,13 +1450,11 @@ app
     }
   });
 
-// Update the media endpoint
 app.get("/media/:groupId/:filename", async (req, res) => {
   try {
     const { groupId, filename } = req.params;
     const filePath = path.join("groups", groupId, "media", filename);
 
-    // Wait for file to be fully written and accessible
     try {
       await retry(
         async () => {
@@ -1468,11 +1468,9 @@ app.get("/media/:groupId/:filename", async (req, res) => {
       return res.status(404).send("File not found or not ready");
     }
 
-    // Set appropriate headers
     res.setHeader("Cache-Control", "public, max-age=31536000"); // 1 year cache
     res.setHeader("Content-Type", "image/jpeg");
 
-    // Stream the file with error handling
     const stream = fs.createReadStream(filePath);
 
     stream.on("error", (error) => {
@@ -1503,31 +1501,25 @@ app.post("/users/:groupId/:userId/notification-preference", (req, res) => {
     }
 
     const users = getGroupUsers(groupId);
-    const userIndex = users.findIndex((user) => user.id === userId);
-    if (userIndex === -1) {
+    const user = getUser(users, userId);
+
+    if (!user) {
       return res.status(404).json({
         error: "User not found"
       });
     }
 
-    const identitiesPath = path.join(
-      "groups",
-      groupId,
-      "users",
-      "identities.json"
-    );
-    const identities = JSON.parse(fs.readFileSync(identitiesPath, "utf8"));
+    users[user.index].notificationPreference = notificationType;
 
-    identities[userIndex].notificationPreference = notificationType;
-
-    fs.writeFileSync(identitiesPath, JSON.stringify(identities, null, 2));
+    saveData(groupId, "users/identities", users);
 
     res.json({
       success: true,
-      user: identities[userIndex]
+      user: user[user.index]
     });
   } catch (error) {
     console.error("Error updating notification preferences:", error);
+
     res.status(500).json({
       success: false,
       error: error.message
@@ -1541,35 +1533,29 @@ app.post("/users/:groupId/:userId/phone-number", (req, res) => {
     const { phoneNumber } = req.body;
 
     const users = getGroupUsers(groupId);
-    const userIndex = users.findIndex((user) => user.id === userId);
-    if (userIndex === -1) {
+    const user = getUser(users, userId);
+
+    if (!user) {
       return res.status(404).json({
         error: "User not found"
       });
     }
 
-    const identitiesPath = path.join(
-      "groups",
-      groupId,
-      "users",
-      "identities.json"
-    );
-    const identities = JSON.parse(fs.readFileSync(identitiesPath, "utf8"));
-
     if (!phoneNumber) {
-      delete identities[userIndex].phoneNumber;
+      delete users[user.index].phoneNumber;
     } else {
-      identities[userIndex].phoneNumber = phoneNumber;
+      users[user.index].phoneNumber = phoneNumber;
     }
 
-    fs.writeFileSync(identitiesPath, JSON.stringify(identities, null, 2));
+    saveData(groupId, "users/identities", users);
 
     res.json({
       success: true,
-      user: identities[userIndex]
+      user: user[user.index]
     });
   } catch (error) {
     console.error("Error updating phone number:", error);
+
     res.status(500).json({
       success: false,
       error: error.message
