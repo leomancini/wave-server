@@ -25,11 +25,9 @@ webpush.setVapidDetails(
 const app = express();
 const port = 3107;
 
-// Move CORS middleware to the top, before any routes
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// CORS middleware with proper OPTIONS handling
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header(
@@ -38,7 +36,6 @@ app.use((req, res, next) => {
   );
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
-  // Handle OPTIONS requests
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
@@ -67,9 +64,8 @@ import generateNotificationText from "./functions/generateNotificationText.js";
 import sendSMS from "./functions/sendSMS.js";
 import saveData from "./functions/saveData.js";
 
-// Create a worker pool for image processing
 const workerPool = new Set();
-const maxWorkers = Math.max(1, cpus().length - 1); // Leave one CPU core free
+const maxWorkers = Math.max(1, cpus().length - 1);
 
 const processImage = async (inputPath, outputPath, options) => {
   return new Promise((resolve, reject) => {
@@ -119,7 +115,6 @@ const processImage = async (inputPath, outputPath, options) => {
   });
 };
 
-// Configure multer with optimized settings
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const filename = file.originalname;
@@ -142,7 +137,7 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     const filename = file.originalname;
     const groupId = filename.split("-")[0];
-    const uploaderId = filename.split("-")[1];
+    const uploaderId = filename.split("-")[2];
     const isKnownUser = getGroupUsers(groupId).some(
       (user) => user.id === uploaderId
     );
@@ -197,7 +192,6 @@ const cleanItemId = (itemId) => {
 //   res.json(result);
 // });
 
-// Add this retry utility at the top with other imports
 const retry = async (fn, retries = 3, delay = 1000) => {
   try {
     return await fn();
@@ -208,7 +202,6 @@ const retry = async (fn, retries = 3, delay = 1000) => {
   }
 };
 
-// Add this helper function if not already present
 const waitForFile = async (filePath, maxAttempts = 5, delay = 1000) => {
   for (let i = 0; i < maxAttempts; i++) {
     try {
@@ -227,32 +220,26 @@ const waitForFile = async (filePath, maxAttempts = 5, delay = 1000) => {
   );
 };
 
-// Update the upload endpoint's file processing
 app.post("/upload", upload.array("media", 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: "No media files provided!" });
     }
 
-    // Process files in parallel with worker pool
     const processPromises = req.files.map(async (file) => {
-      const uploaderId = req.body.uploaderId;
-      const newFilename = `${req.body.itemId.replace("-new-upload", "")}.jpg`;
-
-      console.log(newFilename);
-      const itemId = path.parse(newFilename).name;
+      const groupId = file.originalname.split("-")[0];
+      const uploaderId = file.originalname.split("-")[1];
+      const itemId = file.originalname.split(".")[0].replace(`${groupId}-`, "");
+      const newFilename = `${itemId}.jpg`;
       const newPath = path.join(path.dirname(file.path), newFilename);
 
       if (file.mimetype.startsWith("image/")) {
-        // Get dimensions before processing
         const dimensions = await getDimensions(file.path);
 
-        // Wait for available worker in pool
         while (workerPool.size >= maxWorkers) {
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
 
-        // Process image with worker
         await processImage(file.path, newPath, {
           width: 1920,
           height: 1080,
@@ -261,29 +248,21 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
           quality: 85
         });
 
-        // Clean up original file
         fs.unlinkSync(file.path);
 
-        const groupId = file.originalname.split("-")[0];
-
-        // Process metadata and thumbnail with retries
         try {
           await Promise.all([
             saveMetadata(groupId, file, itemId, uploaderId, dimensions),
-            // Add retry logic for thumbnail generation
             retry(async () => {
-              // Verify the source file exists and is readable
-              await fs.promises.access(newPath, fs.constants.R_OK);
-              // Generate thumbnail with increased timeout
+              await waitForFile(newPath);
               await generateThumbnail(groupId, newPath, itemId);
-              // Verify thumbnail was created
               const thumbnailPath = path.join(
                 "groups",
                 groupId,
                 "thumbnails",
                 `${itemId}.jpg`
               );
-              await fs.promises.access(thumbnailPath, fs.constants.R_OK);
+              await waitForFile(thumbnailPath);
             }),
             updateUnreadItems(groupId, itemId, uploaderId).catch((err) => {
               console.error("Error updating unread items:", err);
@@ -294,7 +273,6 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
           throw new Error(`Failed to process ${newFilename}: ${error.message}`);
         }
 
-        // Queue notification after successful processing
         modifyNotificationsQueue(
           "add",
           groupId,
@@ -309,7 +287,6 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
       }
     });
 
-    // Wait for all files to be processed
     await Promise.all(processPromises);
 
     res.json({
@@ -361,16 +338,13 @@ app.get("/stats/:groupId", (req, res) => {
       });
     }
 
-    // Get user count
     const users = getGroupUsers(groupId);
     const userCount = users.length;
 
-    // Get media count
     const mediaPath = path.join(groupPath, "media");
     const mediaFiles = fs.readdirSync(mediaPath);
     const mediaCount = mediaFiles.length;
 
-    // Get reaction stats and top reactions
     const reactionsPath = path.join(groupPath, "reactions");
     let totalReactions = 0;
     let reactionCounts = {};
@@ -390,13 +364,11 @@ app.get("/stats/:groupId", (req, res) => {
       });
     }
 
-    // Get top 3 reactions
     const topReactions = Object.entries(reactionCounts)
       .sort(([, a], [, b]) => b - a)
       .slice(0, 3)
       .map(([reaction, count]) => ({ reaction, count }));
 
-    // Get comment stats
     const commentsPath = path.join(groupPath, "comments");
     let totalComments = 0;
     if (fs.existsSync(commentsPath)) {
@@ -1043,7 +1015,6 @@ app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
     const { groupId, userId } = req.params;
     const subscription = req.body;
 
-    // Basic validation
     if (!subscription) {
       return res.status(400).json({
         success: false,
@@ -1052,7 +1023,6 @@ app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
       });
     }
 
-    // Validate endpoint
     if (!subscription.endpoint || subscription.endpoint.trim() === "") {
       return res.status(400).json({
         success: false,
@@ -1071,13 +1041,11 @@ app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
 
     confirmDirectoryExists(subscriptionsDir);
 
-    // Create/load existing subscriptions
     let subscriptions = {};
     if (fs.existsSync(subscriptionsPath)) {
       subscriptions = JSON.parse(fs.readFileSync(subscriptionsPath, "utf8"));
     }
 
-    // Save or update the user's subscription
     subscriptions[userId] = {
       subscription,
       timestamp: Date.now(),
@@ -1177,7 +1145,6 @@ app.get("/web-push/send-test/:groupId/:userId", async (req, res) => {
         error.statusCode === 410 ||
         error.body?.includes("unsubscribed or expired")
       ) {
-        // Remove expired subscription
         delete subscriptions[userId];
         fs.writeFileSync(
           subscriptionsPath,
@@ -1197,7 +1164,6 @@ app.get("/web-push/send-test/:groupId/:userId", async (req, res) => {
   }
 });
 
-// Helper function to validate subscription
 const validateSubscription = async (subscription) => {
   try {
     const payload = JSON.stringify({
