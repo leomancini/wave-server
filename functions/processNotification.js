@@ -119,7 +119,7 @@ const processNotificationForUser = async (
     notifications.push(notification);
 
     sendPushNotification(groupId, userId, {
-      title: `New activity in (WAVE)${groupId}!`,
+      title: `New activity in WAVE!`,
       body: generateNotificationText(notification)
     });
   } else if (action === "remove") {

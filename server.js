@@ -1113,8 +1113,8 @@ app.get("/web-push/send-test/:groupId/:userId", async (req, res) => {
 
   try {
     sendPushNotification(groupId, userId, {
-      title: `New activity in (WAVE)${groupId}!`,
-      body: "Helloooo"
+      title: `New activity in WAVE!`,
+      body: "This is a test notification."
     });
     res.json({ success: true });
   } catch (error) {
