@@ -281,7 +281,7 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
 
     const processPromises = req.files.map(async (file) => {
       const groupId = file.originalname.split("-")[0];
-      const uploaderId = file.originalname.split("-")[1];
+      const uploaderId = file.originalname.split("-")[2];
       const itemId = file.originalname.split(".")[0].replace(`${groupId}-`, "");
       const newFilename = `${itemId}.jpg`;
       const newPath = path.join(path.dirname(file.path), newFilename);
