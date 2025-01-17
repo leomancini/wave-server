@@ -118,6 +118,7 @@ const processNotificationForUser = async (
   if (action === "add") {
     notifications.push(notification);
 
+    // TODO: Check if user has notification preference set to PUSH
     sendPushNotification(groupId, userId, {
       title: `New activity in WAVE!`,
       body: generateNotificationText(notification)
