@@ -118,11 +118,6 @@ const processNotificationForUser = async (
   if (action === "add") {
     notifications.push(notification);
 
-    console.log(
-      `To ${userId}: ${generateNotificationText(notification)}`,
-      notification
-    );
-
     sendPushNotification(groupId, userId, {
       title: `New activity in (WAVE)${groupId}!`,
       body: generateNotificationText(notification)
