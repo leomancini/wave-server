@@ -54,7 +54,7 @@ import getDimensions from "./functions/getDimensions.js";
 import getGroupUsers from "./functions/getGroupUsers.js";
 import getUser from "./functions/getUser.js";
 import generateUserId from "./functions/generateUserId.js";
-import modifyNotificationsQueue from "./functions/modifyNotificationsQueue.js";
+import processNotification from "./functions/processNotification.js";
 import getMetadataForItem from "./functions/getMetadataForItem.js";
 import getReactionsForItem from "./functions/getReactionsForItem.js";
 import getCommentsForItem from "./functions/getCommentsForItem.js";
@@ -267,15 +267,7 @@ const processUploadedFile = async (
     throw new Error(`Failed to process ${newFilename}: ${error.message}`);
   }
 
-  modifyNotificationsQueue(
-    "add",
-    groupId,
-    itemId,
-    uploaderId,
-    null,
-    "upload",
-    null
-  );
+  processNotification("add", groupId, itemId, uploaderId, null, "upload", null);
 
   file.filename = newFilename;
   file.path = newPath;
@@ -628,7 +620,7 @@ app.post("/media/:groupId/:itemId/reactions", (req, res) => {
     );
     if (existingReaction) {
       reactions = reactions.filter((r) => r.userId !== userId);
-      modifyNotificationsQueue(
+      processNotification(
         "remove",
         groupId,
         itemId,
@@ -647,7 +639,7 @@ app.post("/media/:groupId/:itemId/reactions", (req, res) => {
       });
 
       if (!hadDifferentReaction) {
-        modifyNotificationsQueue(
+        processNotification(
           "add",
           groupId,
           itemId,
@@ -699,15 +691,9 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
 
     fs.writeFileSync(commentsFile, JSON.stringify(comments, null, 2));
 
-    modifyNotificationsQueue(
-      "add",
-      groupId,
-      itemId,
-      uploaderId,
-      userId,
-      "comment",
-      { comment }
-    );
+    processNotification("add", groupId, itemId, uploaderId, userId, "comment", {
+      comment
+    });
 
     res.json({
       success: true,

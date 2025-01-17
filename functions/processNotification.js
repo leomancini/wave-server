@@ -22,7 +22,7 @@ export default async (
     const users = getGroupUsers(groupId);
     users.forEach((user) => {
       if (user.id !== uploaderId) {
-        modifyNotificationsQueueFileForUser(
+        processNotificationForUser(
           "add",
           groupId,
           user.id,
@@ -33,7 +33,7 @@ export default async (
   } else if (type === "comment") {
     // Add to queue for uploader, if the commenter is not the uploader
     if (userId !== uploaderId) {
-      modifyNotificationsQueueFileForUser(
+      processNotificationForUser(
         "add",
         groupId,
         uploaderId,
@@ -55,7 +55,7 @@ export default async (
       (id) => id !== uploaderId && id !== userId
     );
     uniqueUserIds.forEach((uniqueUserId) => {
-      modifyNotificationsQueueFileForUser(
+      processNotificationForUser(
         "add",
         groupId,
         uniqueUserId,
@@ -72,7 +72,7 @@ export default async (
     // Add to or remove from queue for uploader,
     // if the reactor is not the uploader
     if (userId !== uploaderId) {
-      modifyNotificationsQueueFileForUser(
+      processNotificationForUser(
         action,
         groupId,
         uploaderId,
@@ -82,7 +82,7 @@ export default async (
   }
 };
 
-const modifyNotificationsQueueFileForUser = async (
+const processNotificationForUser = async (
   action,
   groupId,
   userId,
@@ -118,12 +118,15 @@ const modifyNotificationsQueueFileForUser = async (
   if (action === "add") {
     notifications.push(notification);
 
-    console.log(generateNotificationText(notification));
+    console.log(
+      `To ${userId}: ${generateNotificationText(notification)}`,
+      notification
+    );
 
-    // sendPushNotification(groupId, userId, {
-    //   title: `New activity in (WAVE)${groupId}!`,
-    //   body: generateNotificationText(notification)
-    // });
+    sendPushNotification(groupId, userId, {
+      title: `New activity in (WAVE)${groupId}!`,
+      body: generateNotificationText(notification)
+    });
   } else if (action === "remove") {
     notifications = notifications.filter(
       (n) =>
