@@ -5,8 +5,18 @@ import confirmDirectoryExists from "./confirmDirectoryExists.js";
 import getGroupUsers from "./getGroupUsers.js";
 import getUsername from "./getUsername.js";
 import getCommentsForItem from "./getCommentsForItem.js";
+import generateNotificationText from "./generateNotificationText.js";
+import sendPushNotification from "./sendPushNotification.js";
 
-export default async (action, groupId, itemId, uploaderId, userId, type) => {
+export default async (
+  action,
+  groupId,
+  itemId,
+  uploaderId,
+  userId,
+  type,
+  content
+) => {
   if (type === "upload") {
     // Add to queue for all users in the group, other than the uploader
     const users = getGroupUsers(groupId);
@@ -16,7 +26,7 @@ export default async (action, groupId, itemId, uploaderId, userId, type) => {
           "add",
           groupId,
           user.id,
-          constructNotificationData(groupId, itemId, uploaderId, type)
+          constructNotificationData(groupId, itemId, uploaderId, type, content)
         );
       }
     });
@@ -31,7 +41,8 @@ export default async (action, groupId, itemId, uploaderId, userId, type) => {
           groupId,
           itemId,
           userId,
-          "comment-on-your-post"
+          "comment-on-your-post",
+          content
         )
       );
     }
@@ -52,7 +63,8 @@ export default async (action, groupId, itemId, uploaderId, userId, type) => {
           groupId,
           itemId,
           userId,
-          "comment-on-post-you-commented-on"
+          "comment-on-post-you-commented-on",
+          content
         )
       );
     });
@@ -64,13 +76,13 @@ export default async (action, groupId, itemId, uploaderId, userId, type) => {
         action,
         groupId,
         uploaderId,
-        constructNotificationData(groupId, itemId, userId, type)
+        constructNotificationData(groupId, itemId, userId, type, content)
       );
     }
   }
 };
 
-const modifyNotificationsQueueFileForUser = (
+const modifyNotificationsQueueFileForUser = async (
   action,
   groupId,
   userId,
@@ -105,6 +117,13 @@ const modifyNotificationsQueueFileForUser = (
 
   if (action === "add") {
     notifications.push(notification);
+
+    console.log(generateNotificationText(notification));
+
+    // sendPushNotification(groupId, userId, {
+    //   title: `New activity in (WAVE)${groupId}!`,
+    //   body: generateNotificationText(notification)
+    // });
   } else if (action === "remove") {
     notifications = notifications.filter(
       (n) =>
@@ -119,13 +138,14 @@ const modifyNotificationsQueueFileForUser = (
   fs.writeFileSync(notificationPath, JSON.stringify(notifications, null, 2));
 };
 
-const constructNotificationData = (groupId, itemId, userId, type) => {
+const constructNotificationData = (groupId, itemId, userId, type, content) => {
   return {
     itemId,
     type,
     user: {
       id: userId,
       name: getUsername(userId, groupId)
-    }
+    },
+    content
   };
 };

@@ -2,7 +2,6 @@ import express from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import sharp from "sharp";
 import QRCode from "qrcode";
 import dotenv from "dotenv";
 import webpush from "web-push";
@@ -60,7 +59,8 @@ import getMetadataForItem from "./functions/getMetadataForItem.js";
 import getReactionsForItem from "./functions/getReactionsForItem.js";
 import getCommentsForItem from "./functions/getCommentsForItem.js";
 import getUnsentNotificationsForUser from "./functions/getUnsentNotificationsForUser.js";
-import generateNotificationText from "./functions/generateNotificationText.js";
+import generateNotificationsSummary from "./functions/generateNotificationsSummary.js";
+import sendPushNotification from "./functions/sendPushNotification.js";
 import sendSMS from "./functions/sendSMS.js";
 import saveData from "./functions/saveData.js";
 
@@ -267,7 +267,15 @@ const processUploadedFile = async (
     throw new Error(`Failed to process ${newFilename}: ${error.message}`);
   }
 
-  modifyNotificationsQueue("add", groupId, itemId, uploaderId, null, "upload");
+  modifyNotificationsQueue(
+    "add",
+    groupId,
+    itemId,
+    uploaderId,
+    null,
+    "upload",
+    null
+  );
 
   file.filename = newFilename;
   file.path = newPath;
@@ -626,7 +634,8 @@ app.post("/media/:groupId/:itemId/reactions", (req, res) => {
         itemId,
         uploaderId,
         userId,
-        "reaction"
+        "reaction",
+        null
       );
     } else {
       const hadDifferentReaction = reactions.some((r) => r.userId === userId);
@@ -644,7 +653,8 @@ app.post("/media/:groupId/:itemId/reactions", (req, res) => {
           itemId,
           uploaderId,
           userId,
-          "reaction"
+          "reaction",
+          { reaction }
         );
       }
     }
@@ -695,7 +705,8 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
       itemId,
       uploaderId,
       userId,
-      "comment"
+      "comment",
+      { comment }
     );
 
     res.json({
@@ -1011,7 +1022,7 @@ app.get(
       // const notificationsToSend = generateNotifications(notifications);
       // res.json(notificationsToSend);
 
-      const notificationText = generateNotificationText(
+      const notificationText = generateNotificationsSummary(
         groupId,
         userId,
         notifications
@@ -1112,65 +1123,14 @@ app.post("/web-push/remove-subscription/:groupId/:userId", async (req, res) => {
 });
 
 app.get("/web-push/send-test/:groupId/:userId", async (req, res) => {
+  const { groupId, userId } = req.params;
+
   try {
-    const { groupId, userId } = req.params;
-    const subscriptionsPath = path.join(
-      "groups",
-      groupId,
-      "notifications",
-      "subscriptions",
-      "web-push.json"
-    );
-
-    if (!fs.existsSync(subscriptionsPath)) {
-      return res.status(404).json({
-        success: false,
-        error: "No subscriptions found"
-      });
-    }
-
-    const subscriptions = JSON.parse(
-      fs.readFileSync(subscriptionsPath, "utf8")
-    );
-    const userSubscription = subscriptions[userId];
-
-    if (!userSubscription) {
-      return res.status(404).json({
-        success: false,
-        error: "User subscription not found"
-      });
-    }
-
-    const payload = JSON.stringify({
-      title: "Test Notification",
-      body: "This is a test notification!",
-      timestamp: Date.now()
+    sendPushNotification(groupId, userId, {
+      title: `New activity in (WAVE)${groupId}!`,
+      body: "Helloooo"
     });
-
-    try {
-      await webpush.sendNotification(userSubscription.subscription, payload);
-      res.json({
-        success: true,
-        message: "Test notification sent successfully"
-      });
-    } catch (error) {
-      if (
-        error.statusCode === 410 ||
-        error.body?.includes("unsubscribed or expired")
-      ) {
-        delete subscriptions[userId];
-        fs.writeFileSync(
-          subscriptionsPath,
-          JSON.stringify(subscriptions, null, 2)
-        );
-        return res.status(410).json({
-          success: false,
-          error: "Subscription has expired",
-          isExpired: true
-        });
-      }
-      throw error;
-    }
+    res.json({ success: true });
   } catch (error) {
     console.error("Error sending test notification:", error);
     res.status(500).json({ success: false, error: error.message });
