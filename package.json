@@ -20,5 +20,10 @@
     "twilio": "^5.4.0",
     "url": "^0.11.3",
     "web-push": "^3.6.7"
+  },
+  "nodemonConfig": {
+    "ignore": [
+      "groups/*"
+    ]
   }
 }
