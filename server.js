@@ -1011,7 +1011,7 @@ app.get(
     if (smsAuthToken === process.env.SMS_AUTH_TOKEN) {
       const notifications = getUnsentNotificationsForUser(groupId, userId);
 
-      // TODO: Check if user has SMS notifications enabled
+      // TODO: Check if user has SMS notifications enabled AND has a verified phone number
 
       // const { phoneNumber, message, smsAuthToken } = req.params;
       // if (smsAuthToken === process.env.SMS_AUTH_TOKEN) {
