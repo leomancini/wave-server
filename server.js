@@ -720,6 +720,21 @@ app.get("/validate-group-user/:groupId/:userId", (req, res) => {
     const userExists = users.some((user) => user.id === userId);
     const user = users.find((user) => user.id === userId);
 
+    // Delete file if phone number verification is incomplete
+    if (!user.phoneNumber) {
+      const phoneNumberVerificationPath = path.join(
+        "groups",
+        groupId,
+        "users",
+        "phone-number-verifications",
+        `${userId}.json`
+      );
+
+      if (fs.existsSync(phoneNumberVerificationPath)) {
+        fs.unlinkSync(phoneNumberVerificationPath);
+      }
+    }
+
     res.json({
       valid: userExists,
       isDuplicate: user?.isDuplicate,
@@ -1452,10 +1467,14 @@ app.post("/users/:groupId/:userId/notification-preference", (req, res) => {
   }
 });
 
-app.post("/users/:groupId/:userId/phone-number", (req, res) => {
+app.post("/users/:groupId/:userId/generate-verification-code", (req, res) => {
   try {
     const { groupId, userId } = req.params;
     const { phoneNumber } = req.body;
+
+    const verificationCode = `${Math.floor(Date.now() * Math.random() * 100)
+      .toString()
+      .substring(0, 6)}`;
 
     const users = getGroupUsers(groupId);
     const user = getUser(users, userId);
@@ -1466,20 +1485,124 @@ app.post("/users/:groupId/:userId/phone-number", (req, res) => {
       });
     }
 
-    if (!phoneNumber) {
-      delete users[user.index].phoneNumber;
-    } else {
-      users[user.index].phoneNumber = phoneNumber;
+    const phoneNumberVerificationsDir = path.join(
+      "groups",
+      groupId,
+      "users",
+      "phone-number-verifications"
+    );
+    confirmDirectoryExists(phoneNumberVerificationsDir);
+
+    const phoneNumberVerificationPath = path.join(
+      phoneNumberVerificationsDir,
+      `${userId}.json`
+    );
+
+    fs.writeFileSync(
+      phoneNumberVerificationPath,
+      JSON.stringify({ phoneNumber, verificationCode }, null, 2)
+    );
+
+    // TODO: Send ${verificationCode} to ${phoneNumber}
+
+    res.json({
+      success: true
+    });
+  } catch (error) {
+    console.error("Error updating phone number:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post("/users/:groupId/:userId/verify-verification-code", (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const { verificationCode } = req.body;
+
+    const users = getGroupUsers(groupId);
+    const user = getUser(users, userId);
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found"
+      });
     }
+
+    const phoneNumberVerificationsDir = path.join(
+      "groups",
+      groupId,
+      "users",
+      "phone-number-verifications"
+    );
+    confirmDirectoryExists(phoneNumberVerificationsDir);
+
+    const phoneNumberVerificationPath = path.join(
+      phoneNumberVerificationsDir,
+      `${userId}.json`
+    );
+
+    if (!fs.existsSync(phoneNumberVerificationPath)) {
+      return res.status(404).json({
+        error: "Phone number verification file not found"
+      });
+    }
+
+    const phoneNumberVerificationFile = fs.readFileSync(
+      phoneNumberVerificationPath,
+      "utf8"
+    );
+    const phoneNumberVerificationData = JSON.parse(phoneNumberVerificationFile);
+
+    const verificationCodeDoesMatch =
+      verificationCode === phoneNumberVerificationData.verificationCode;
+
+    if (verificationCodeDoesMatch) {
+      fs.unlinkSync(phoneNumberVerificationPath);
+
+      users[user.index].phoneNumber = phoneNumberVerificationData.phoneNumber;
+
+      saveData(groupId, "users/identities", users);
+    }
+
+    res.json({
+      success: verificationCodeDoesMatch
+    });
+  } catch (error) {
+    console.error("Error verifying phone number:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post("/users/:groupId/:userId/delete-phone-number", (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+
+    const users = getGroupUsers(groupId);
+    const user = getUser(users, userId);
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found"
+      });
+    }
+
+    delete users[user.index].phoneNumber;
 
     saveData(groupId, "users/identities", users);
 
     res.json({
-      success: true,
-      user: user[user.index]
+      success: true
     });
   } catch (error) {
-    console.error("Error updating phone number:", error);
+    console.error("Error deleting phone number:", error);
 
     res.status(500).json({
       success: false,
