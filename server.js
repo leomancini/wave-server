@@ -448,7 +448,12 @@ app.get("/users/:groupId", (req, res) => {
 
     const users = getGroupUsers(groupId);
 
-    res.json(users);
+    res.json(
+      users.map((user) => ({
+        id: user.id,
+        name: user.name
+      }))
+    );
   } catch (error) {
     res.status(500).json({
       error: "Failed to get group users",
