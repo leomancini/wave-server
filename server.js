@@ -762,7 +762,7 @@ app.get("/validate-group-user/:groupId/:userId", (req, res) => {
       name: user?.name,
       notificationPreference: user?.notificationPreference,
       phoneNumber: user?.phoneNumber,
-      subscriptionStatus,
+      pushNotificationsEnabled: subscriptionStatus,
       error: userExists ? null : "User not found in group"
     });
   } catch (error) {
