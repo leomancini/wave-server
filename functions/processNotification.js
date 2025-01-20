@@ -3,6 +3,7 @@ import * as path from "path";
 
 import confirmDirectoryExists from "./confirmDirectoryExists.js";
 import getGroupUsers from "./getGroupUsers.js";
+import getUser from "./getUser.js";
 import getUsername from "./getUsername.js";
 import getCommentsForItem from "./getCommentsForItem.js";
 import generateNotificationText from "./generateNotificationText.js";
@@ -118,11 +119,17 @@ const processNotificationForUser = async (
   if (action === "add") {
     notifications.push(notification);
 
-    // TODO: Check if user has notification preference set to PUSH
-    sendPushNotification(groupId, userId, {
-      title: `New activity in WAVE!`,
-      body: generateNotificationText(notification)
-    });
+    const user = getUser(userId);
+
+    if (
+      user.notificationPreference === "PUSH" &&
+      user.pushNotificationsEnabled
+    ) {
+      sendPushNotification(groupId, userId, {
+        title: `New activity in WAVE!`,
+        body: generateNotificationText(notification)
+      });
+    }
   } else if (action === "remove") {
     notifications = notifications.filter(
       (n) =>
