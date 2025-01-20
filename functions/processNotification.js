@@ -121,6 +121,7 @@ const processNotificationForUser = async (
 
     // const user = getUser(userId);
 
+    // TODO: Check if user has notification preference set to PUSH
     // if (
     //   user.notificationPreference === "PUSH" &&
     //   user.pushNotificationsEnabled
