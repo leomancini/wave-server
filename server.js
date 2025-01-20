@@ -1163,65 +1163,6 @@ const validateSubscription = async (subscription) => {
   }
 };
 
-app.post("/web-push/validate-subscriptions/:groupId", async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    const subscriptionsPath = path.join(
-      "groups",
-      groupId,
-      "notifications",
-      "subscriptions",
-      "web-push.json"
-    );
-
-    if (!fs.existsSync(subscriptionsPath)) {
-      return res.json({ success: true, cleaned: 0 });
-    }
-
-    const subscriptions = JSON.parse(
-      fs.readFileSync(subscriptionsPath, "utf8")
-    );
-    const userIds = Object.keys(subscriptions);
-    let cleaned = 0;
-    let totalValid = 0;
-
-    for (const userId of userIds) {
-      try {
-        const isValid = await validateSubscription(
-          subscriptions[userId].subscription
-        );
-        if (isValid) {
-          totalValid++;
-        } else {
-          delete subscriptions[userId];
-          cleaned++;
-        }
-      } catch (error) {
-        console.error("Error validating subscription:", error);
-        delete subscriptions[userId];
-        cleaned++;
-      }
-    }
-
-    if (cleaned > 0) {
-      fs.writeFileSync(
-        subscriptionsPath,
-        JSON.stringify(subscriptions, null, 2)
-      );
-    }
-
-    res.json({
-      success: true,
-      cleaned,
-      remainingSubscriptions: totalValid,
-      activeUsers: Object.keys(subscriptions).length
-    });
-  } catch (error) {
-    console.error("Error validating subscriptions:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 app
   .route("/web-push/check-subscription/:groupId/:userId")
   .get(async (req, res) => {
