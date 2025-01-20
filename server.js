@@ -1084,7 +1084,7 @@ app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
 
     sendPushNotification(groupId, userId, {
       title: `Notifications enabled for WAVE!`,
-      body: "You will be notified of activity in this group."
+      body: "You'll be notified of activity in this group."
     });
 
     res.json({
