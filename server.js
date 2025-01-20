@@ -1083,8 +1083,8 @@ app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
     fs.writeFileSync(subscriptionsPath, JSON.stringify(subscriptions, null, 2));
 
     sendPushNotification(groupId, userId, {
-      title: `Notifications turned on for WAVE!`,
-      body: "You will now be notified of new activity in this group."
+      title: `Notifications enabled for WAVE!`,
+      body: "You will be notified of activity in this group."
     });
 
     res.json({
