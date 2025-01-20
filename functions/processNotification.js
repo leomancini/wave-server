@@ -119,17 +119,17 @@ const processNotificationForUser = async (
   if (action === "add") {
     notifications.push(notification);
 
-    const user = getUser(userId);
+    // const user = getUser(userId);
 
-    if (
-      user.notificationPreference === "PUSH" &&
-      user.pushNotificationsEnabled
-    ) {
-      sendPushNotification(groupId, userId, {
-        title: `New activity in WAVE!`,
-        body: generateNotificationText(notification)
-      });
-    }
+    // if (
+    //   user.notificationPreference === "PUSH" &&
+    //   user.pushNotificationsEnabled
+    // ) {
+    sendPushNotification(groupId, userId, {
+      title: `New activity in WAVE!`,
+      body: generateNotificationText(notification)
+    });
+    // }
   } else if (action === "remove") {
     notifications = notifications.filter(
       (n) =>
