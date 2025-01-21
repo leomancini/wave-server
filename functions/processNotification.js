@@ -18,12 +18,15 @@ export default async (
   type,
   content
 ) => {
+  const users = getGroupUsers(groupId);
+  const user = getUser(users, userId);
+
   if (type === "upload") {
     // Add to queue for all users in the group, other than the uploader
-    const users = getGroupUsers(groupId);
     users.forEach((user) => {
       if (user.id !== uploaderId) {
         processNotificationForUser(
+          user,
           "add",
           groupId,
           user.id,
@@ -35,6 +38,7 @@ export default async (
     // Add to queue for uploader, if the commenter is not the uploader
     if (userId !== uploaderId) {
       processNotificationForUser(
+        user,
         "add",
         groupId,
         uploaderId,
@@ -57,6 +61,7 @@ export default async (
     );
     uniqueUserIds.forEach((uniqueUserId) => {
       processNotificationForUser(
+        user,
         "add",
         groupId,
         uniqueUserId,
@@ -74,6 +79,7 @@ export default async (
     // if the reactor is not the uploader
     if (userId !== uploaderId) {
       processNotificationForUser(
+        user,
         action,
         groupId,
         uploaderId,
@@ -84,6 +90,7 @@ export default async (
 };
 
 const processNotificationForUser = async (
+  user,
   action,
   groupId,
   userId,
@@ -119,18 +126,15 @@ const processNotificationForUser = async (
   if (action === "add") {
     notifications.push(notification);
 
-    // const user = getUser(userId);
-
-    // TODO: Check if user has notification preference set to PUSH
-    // if (
-    //   user.notificationPreference === "PUSH" &&
-    //   user.pushNotificationsEnabled
-    // ) {
-    sendPushNotification(groupId, userId, {
-      title: `New activity in WAVE!`,
-      body: generateNotificationText(notification)
-    });
-    // }
+    if (
+      user.notificationPreference === "PUSH" &&
+      user.pushNotificationsEnabled
+    ) {
+      sendPushNotification(groupId, userId, {
+        title: `New activity in WAVE!`,
+        body: generateNotificationText(notification)
+      });
+    }
   } else if (action === "remove") {
     notifications = notifications.filter(
       (n) =>
