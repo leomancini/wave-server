@@ -98,8 +98,6 @@ const processNotificationForUser = async (
   const userData = getUser(users, userId);
   const user = userData.user;
 
-  console.log(user);
-
   const notificationsDir = path.join("groups", groupId, "notifications");
   confirmDirectoryExists(notificationsDir);
 
