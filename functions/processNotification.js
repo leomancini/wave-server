@@ -95,8 +95,10 @@ const processNotificationForUser = async (
   userId,
   notification
 ) => {
-  // const userData = getUser(users, userId);
-  // const user = userData.user;
+  const userData = getUser(users, userId);
+  const user = userData.user;
+
+  console.log(user);
 
   const notificationsDir = path.join("groups", groupId, "notifications");
   confirmDirectoryExists(notificationsDir);
@@ -128,12 +130,12 @@ const processNotificationForUser = async (
   if (action === "add") {
     notifications.push(notification);
 
-    // if (user.notificationPreference === "PUSH") {
-    sendPushNotification(groupId, userId, {
-      title: `New activity in WAVE!`,
-      body: generateNotificationText(notification)
-    });
-    // }
+    if (user.notificationPreference === "PUSH") {
+      sendPushNotification(groupId, userId, {
+        title: `New activity in WAVE!`,
+        body: generateNotificationText(notification)
+      });
+    }
   } else if (action === "remove") {
     notifications = notifications.filter(
       (n) =>
