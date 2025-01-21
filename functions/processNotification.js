@@ -19,15 +19,14 @@ export default async (
   content
 ) => {
   const users = getGroupUsers(groupId);
-  const user = getUser(users, userId);
 
   if (type === "upload") {
     // Add to queue for all users in the group, other than the uploader
     users.forEach((user) => {
       if (user.id !== uploaderId) {
         processNotificationForUser(
-          user,
           "add",
+          users,
           groupId,
           user.id,
           constructNotificationData(groupId, itemId, uploaderId, type, content)
@@ -38,8 +37,8 @@ export default async (
     // Add to queue for uploader, if the commenter is not the uploader
     if (userId !== uploaderId) {
       processNotificationForUser(
-        user,
         "add",
+        users,
         groupId,
         uploaderId,
         constructNotificationData(
@@ -61,8 +60,8 @@ export default async (
     );
     uniqueUserIds.forEach((uniqueUserId) => {
       processNotificationForUser(
-        user,
         "add",
+        users,
         groupId,
         uniqueUserId,
         constructNotificationData(
@@ -79,8 +78,8 @@ export default async (
     // if the reactor is not the uploader
     if (userId !== uploaderId) {
       processNotificationForUser(
-        user,
         action,
+        users,
         groupId,
         uploaderId,
         constructNotificationData(groupId, itemId, userId, type, content)
@@ -90,12 +89,14 @@ export default async (
 };
 
 const processNotificationForUser = async (
-  user,
   action,
+  users,
   groupId,
   userId,
   notification
 ) => {
+  const user = getUser(users, userId);
+
   const notificationsDir = path.join("groups", groupId, "notifications");
   confirmDirectoryExists(notificationsDir);
 
