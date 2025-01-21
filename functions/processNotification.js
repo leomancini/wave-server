@@ -95,7 +95,8 @@ const processNotificationForUser = async (
   userId,
   notification
 ) => {
-  const user = getUser(users, userId);
+  const userData = getUser(users, userId);
+  const user = userData.user;
 
   const notificationsDir = path.join("groups", groupId, "notifications");
   confirmDirectoryExists(notificationsDir);
@@ -126,8 +127,6 @@ const processNotificationForUser = async (
 
   if (action === "add") {
     notifications.push(notification);
-
-    console.log(user);
 
     if (user.notificationPreference === "PUSH") {
       sendPushNotification(groupId, userId, {
