@@ -2,7 +2,7 @@ import webpush from "web-push";
 import fs from "fs";
 import path from "path";
 
-export default async (groupId, userId, { title, body, url }) => {
+export default async (groupId, userId, { title, body, url, data }) => {
   try {
     const subscriptionsPath = path.join(
       "groups",
@@ -35,8 +35,8 @@ export default async (groupId, userId, { title, body, url }) => {
       title,
       body,
       url,
-      timestamp: Date.now(),
-      data: "Hello"
+      data,
+      timestamp: Date.now()
     });
 
     try {
