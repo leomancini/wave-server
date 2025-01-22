@@ -1098,11 +1098,7 @@ app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
 
     subscriptions[userId] = {
       subscription,
-      timestamp: Date.now(),
-      lastRenewal: new Date().toISOString(),
-      renewalCount: subscriptions[userId]?.renewalCount
-        ? subscriptions[userId].renewalCount + 1
-        : 0
+      timestamp: Date.now()
     };
 
     fs.writeFileSync(subscriptionsPath, JSON.stringify(subscriptions, null, 2));
