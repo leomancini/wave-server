@@ -131,7 +131,8 @@ const processNotificationForUser = async (
     if (user.notificationPreference === "PUSH") {
       sendPushNotification(groupId, userId, {
         title: `New activity in WAVE!`,
-        body: generateNotificationText(notification),
+        // body: generateNotificationText(notification),
+        body: `${process.env.CLIENT_URL}/${groupId}/${userId}#${notification.itemId}`,
         url: `${process.env.CLIENT_URL}/${groupId}/${userId}#${notification.itemId}`
       });
     }
