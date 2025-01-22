@@ -132,7 +132,7 @@ const processNotificationForUser = async (
       sendPushNotification(groupId, userId, {
         title: `New activity in WAVE!`,
         // body: generateNotificationText(notification),
-        body: `${process.env.CLIENT_URL}/${groupId}/${userId}#${notification.itemId}`
+        body: `${process.env.CLIENT_URL}/${groupId}/${userId}#${notification.itemId}`,
         url: `${process.env.CLIENT_URL}/${groupId}/${userId}#${notification.itemId}`
       });
     }
