@@ -1109,7 +1109,8 @@ app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
 
     sendPushNotification(groupId, userId, {
       title: `Notifications enabled for WAVE!`,
-      body: "You'll be notified of activity in this group."
+      body: "You'll be notified of activity in this group.",
+      url: `${process.env.CLIENT_URL}/${groupId}/${userId}`
     });
 
     res.json({
@@ -1159,7 +1160,8 @@ app.get("/web-push/send-test/:groupId/:userId", async (req, res) => {
   try {
     sendPushNotification(groupId, userId, {
       title: `New activity in WAVE!`,
-      body: "This is a test notification."
+      body: "This is a test notification.",
+      url: `${process.env.CLIENT_URL}/${groupId}/${userId}`
     });
     res.json({ success: true });
   } catch (error) {

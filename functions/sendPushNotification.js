@@ -2,7 +2,7 @@ import webpush from "web-push";
 import fs from "fs";
 import path from "path";
 
-export default async (groupId, userId, { title, body }) => {
+export default async (groupId, userId, { title, body, url }) => {
   try {
     const subscriptionsPath = path.join(
       "groups",
@@ -34,6 +34,7 @@ export default async (groupId, userId, { title, body }) => {
     const payload = JSON.stringify({
       title,
       body,
+      url,
       timestamp: Date.now()
     });
 
