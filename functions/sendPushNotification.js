@@ -35,7 +35,8 @@ export default async (groupId, userId, { title, body, url }) => {
       title,
       body,
       url,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      data: "Hello"
     });
 
     try {
