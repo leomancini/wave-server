@@ -133,7 +133,9 @@ const processNotificationForUser = async (
         title: `New activity in WAVE!`,
         body: generateNotificationText(notification),
         url: `${process.env.CLIENT_URL}/${groupId}/${userId}`,
-        data: notification.itemId
+        data: {
+          itemId: notification.itemId
+        }
       });
     }
   } else if (action === "remove") {
