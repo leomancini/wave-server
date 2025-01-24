@@ -1354,7 +1354,7 @@ app.post("/users/:groupId/:userId/generate-verification-code", (req, res) => {
 
     if (process.env.ENVIRONMENT === "production") {
       sendSMS(
-        formattedPhoneNumber,
+        phoneNumber.e164,
         `Your WAVE verification code is ${verificationCode}`
       );
     }
