@@ -6,7 +6,7 @@ export default (groupId, userId) => {
     "groups",
     groupId,
     "notifications",
-    "unsent",
+    "sms-unsent",
     `${userId}.json`
   );
 

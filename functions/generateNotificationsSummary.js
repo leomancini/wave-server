@@ -29,16 +29,16 @@ export default (groupId, userId, notifications) => {
       case "upload":
         const contentCount = group.length;
         return `${formatUserList(users)} added ${
-          contentCount > 1 ? `${contentCount} posts` : "a new post"
+          contentCount > 1 ? "posts" : "a post"
         }`;
 
       default:
-        return `Unknown notification type: ${type}`;
+        return `Unknown: ${type}`;
     }
   });
 
   const baseUrl = `${process.env.CLIENT_URL}/${groupId}/${userId}`;
-  const prefix = `New activity in (WAVE)${groupId}! `;
+  const prefix = `(WAVE)${groupId}: `;
   const suffix = `. ${baseUrl}`;
   const mainText = summaries.join(". ");
 

@@ -105,7 +105,7 @@ const processNotificationForUser = async (
     "groups",
     groupId,
     "notifications",
-    "unsent"
+    "sms-unsent"
   );
   confirmDirectoryExists(notificationsUnsentDir);
 
@@ -126,9 +126,13 @@ const processNotificationForUser = async (
   }
 
   if (action === "add") {
-    notifications.push(notification);
-
-    if (user.notificationPreference === "PUSH") {
+    if (
+      user.notificationPreference === "SMS" &&
+      user.phoneNumber &&
+      user.phoneNumber.verified
+    ) {
+      notifications.push(notification);
+    } else if (user.notificationPreference === "PUSH") {
       sendPushNotification(groupId, userId, {
         title: `New activity in WAVE!`,
         body: generateNotificationText(notification),

@@ -9,11 +9,9 @@ export default (recipientPhoneNumber, message) => {
     process.env.TWILIO_AUTH_TOKEN
   );
 
-  client.messages
-    .create({
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: recipientPhoneNumber,
-      body: message
-    })
-    .then((message) => console.log(message.sid));
+  client.messages.create({
+    from: process.env.TWILIO_PHONE_NUMBER,
+    to: recipientPhoneNumber,
+    body: message
+  });
 };

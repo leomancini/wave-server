@@ -60,6 +60,7 @@ import getReactionsForItem from "./functions/getReactionsForItem.js";
 import getCommentsForItem from "./functions/getCommentsForItem.js";
 import getUnsentNotificationsForUser from "./functions/getUnsentNotificationsForUser.js";
 import generateNotificationsSummary from "./functions/generateNotificationsSummary.js";
+import clearNotificationsQueue from "./functions/clearNotificationsQueue.js";
 import sendPushNotification from "./functions/sendPushNotification.js";
 import sendSMS from "./functions/sendSMS.js";
 import saveData from "./functions/saveData.js";
@@ -726,7 +727,7 @@ app.get("/validate-group-user/:groupId/:userId", (req, res) => {
     const user = users.find((user) => user.id === userId);
 
     // Delete file if phone number verification is incomplete
-    if (!user.phoneNumber) {
+    if (!user.phoneNumber || !user.phoneNumber.verified) {
       const phoneNumberVerificationPath = path.join(
         "groups",
         groupId,
@@ -816,8 +817,7 @@ app.post("/create-group", (req, res) => {
     fs.mkdirSync(path.join(groupPath, "reactions"));
     fs.mkdirSync(path.join(groupPath, "comments"));
     fs.mkdirSync(path.join(groupPath, "notifications"));
-    fs.mkdirSync(path.join(groupPath, "notifications", "unsent"));
-    fs.mkdirSync(path.join(groupPath, "notifications", "sent"));
+    fs.mkdirSync(path.join(groupPath, "notifications", "sms-unsent"));
 
     const users = [
       {
@@ -1028,37 +1028,103 @@ app.post("/mark-items-read/:groupId/:userId", async (req, res) => {
   }
 });
 
-app.get(
-  "/send-sms-notifications/:groupId/:userId/:smsAuthToken",
-  (req, res) => {
-    const { groupId, userId, smsAuthToken } = req.params;
+const SMS_RATE_LIMIT = {
+  perSecond: 1, // Twilio's default is 1 message per second
+  perMinute: 60 // Twilio's default is 60 messages per minute
+};
 
-    if (smsAuthToken === process.env.SMS_AUTH_TOKEN) {
-      const notifications = getUnsentNotificationsForUser(groupId, userId);
+let smsQueue = [];
+let smsSentLastMinute = 0;
+let lastSmsSentTime = 0;
 
-      // TODO: Check if user has SMS notifications enabled AND has a verified phone number
+const processSmsQueue = async () => {
+  if (smsQueue.length === 0) return;
 
-      // const { phoneNumber, message, smsAuthToken } = req.params;
-      // if (smsAuthToken === process.env.SMS_AUTH_TOKEN) {
-      //   sendSMS(phoneNumber, message);
-      //   res.json({ success: true });
-      // } else {
-      //   res.status(401).json({ error: "Unauthorized" });
-      // }
-      // const notificationsToSend = generateNotifications(notifications);
-      // res.json(notificationsToSend);
+  const now = Date.now();
 
-      const notificationText = generateNotificationsSummary(
-        groupId,
-        userId,
-        notifications
-      );
-      res.json(notificationText);
-    } else {
-      res.status(401).json({ error: "Unauthorized" });
-    }
+  if (now - lastSmsSentTime > 60000) {
+    smsSentLastMinute = 0;
   }
-);
+
+  if (smsSentLastMinute >= SMS_RATE_LIMIT.perMinute) {
+    setTimeout(processSmsQueue, 1000);
+    return;
+  }
+
+  if (now - lastSmsSentTime < 1000) {
+    setTimeout(processSmsQueue, 1000);
+    return;
+  }
+
+  const { phoneNumber, text } = smsQueue.shift();
+
+  try {
+    await sendSMS(phoneNumber, text);
+    lastSmsSentTime = Date.now();
+    smsSentLastMinute++;
+
+    if (smsQueue.length > 0) {
+      setTimeout(processSmsQueue, 1000);
+    }
+  } catch (error) {
+    console.error("Error sending SMS:", error);
+    smsQueue.push({ phoneNumber, text });
+    setTimeout(processSmsQueue, 1000);
+  }
+};
+
+const queueSMS = (phoneNumber, text) => {
+  smsQueue.push({ phoneNumber, text });
+  if (smsQueue.length === 1) {
+    processSmsQueue();
+  }
+};
+
+app.get("/send-sms-notifications/:smsAuthToken", (req, res) => {
+  const { smsAuthToken } = req.params;
+
+  if (smsAuthToken !== process.env.SMS_AUTH_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const groups = fs
+    .readdirSync("groups")
+    .filter((dir) => fs.statSync(path.join("groups", dir)).isDirectory());
+
+  try {
+    groups.forEach((groupId) => {
+      const users = getGroupUsers(groupId);
+
+      users.forEach((user) => {
+        const notifications = getUnsentNotificationsForUser(groupId, user.id);
+
+        if (
+          notifications.length > 0 &&
+          user.notificationPreference === "SMS" &&
+          user.phoneNumber &&
+          user.phoneNumber.verified
+        ) {
+          const notificationText = generateNotificationsSummary(
+            groupId,
+            user.id,
+            notifications
+          );
+
+          queueSMS(user.phoneNumber.e164, notificationText);
+
+          clearNotificationsQueue(groupId, user.id);
+        }
+      });
+    });
+
+    res.json({
+      success: true
+    });
+  } catch (error) {
+    console.error("Error queuing SMS notifications:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 app.post("/web-push/save-subscription/:groupId/:userId", async (req, res) => {
   try {
@@ -1276,12 +1342,19 @@ app.post("/users/:groupId/:userId/generate-verification-code", (req, res) => {
 
     fs.writeFileSync(
       phoneNumberVerificationPath,
-      JSON.stringify({ phoneNumber, verificationCode }, null, 2)
+      JSON.stringify(
+        {
+          phoneNumber,
+          verificationCode
+        },
+        null,
+        2
+      )
     );
 
     if (process.env.ENVIRONMENT === "production") {
       sendSMS(
-        phoneNumber,
+        formattedPhoneNumber,
         `Your WAVE verification code is ${verificationCode}`
       );
     }
@@ -1344,7 +1417,11 @@ app.post("/users/:groupId/:userId/verify-verification-code", (req, res) => {
     if (verificationCodeDoesMatch) {
       fs.unlinkSync(phoneNumberVerificationPath);
 
-      users[user.index].phoneNumber = phoneNumberVerificationData.phoneNumber;
+      users[user.index].phoneNumber = {
+        display: phoneNumberVerificationData.phoneNumber.display,
+        e164: phoneNumberVerificationData.phoneNumber.e164,
+        verified: true
+      };
 
       saveData(groupId, "users/identities", users);
     }
