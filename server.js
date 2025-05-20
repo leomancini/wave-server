@@ -922,7 +922,7 @@ app.get("/generate-qr-code/:groupId/:userId", async (req, res) => {
       width: 1024,
       color: {
         dark: "#000000",
-        light: "#F2F2F2"
+        light: "#FFFFFF"
       }
     });
 
