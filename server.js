@@ -280,6 +280,18 @@ app.post("/upload", upload.array("media", 10), async (req, res) => {
       return res.status(400).json({ error: "No media files provided!" });
     }
 
+    // Check if any file is trying to upload to DEMO group
+    const demoUpload = req.files.find((file) => {
+      const groupId = file.originalname.split("-")[0];
+      return groupId === "DEMO";
+    });
+
+    if (demoUpload) {
+      return res
+        .status(403)
+        .json({ error: "Uploads are not allowed in demo group!" });
+    }
+
     const processPromises = req.files.map(async (file) => {
       const groupId = file.originalname.split("-")[0];
       const uploaderId = file.originalname.split("-")[2];
