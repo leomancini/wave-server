@@ -674,6 +674,13 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
     const itemId = cleanItemId(req.params.itemId);
     const { userId, comment } = req.body;
     const uploaderId = itemId.split("-")[1];
+
+    if (groupId === "DEMO") {
+      return res
+        .status(403)
+        .json({ error: "Comments are not allowed in demo group!" });
+    }
+
     if (!userId || !comment) {
       return res.status(400).json({ error: "Missing required fields" });
     }
