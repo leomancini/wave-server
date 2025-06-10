@@ -274,61 +274,93 @@ const processUploadedFile = async (
   file.path = newPath;
 };
 
-app.post("/upload", upload.array("media", 10), async (req, res) => {
-  try {
-    if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ error: "No media files provided!" });
-    }
-
-    // Check if any file is trying to upload to DEMO group
-    const demoUpload = req.files.find((file) => {
-      const groupId = file.originalname.split("-")[0];
-      return groupId === "DEMO";
-    });
-
-    if (demoUpload) {
-      return res
-        .status(403)
-        .json({ error: "Uploads are not allowed in demo group!" });
-    }
-
-    const processPromises = req.files.map(async (file) => {
-      const groupId = file.originalname.split("-")[0];
-      const uploaderId = file.originalname.split("-")[2];
-      const itemId = path
-        .parse(file.originalname)
-        .name.replace(`${groupId}-`, "");
-      const newFilename = `${itemId}.jpg`;
-      const newPath = path.join(path.dirname(file.path), newFilename);
-
-      if (file.mimetype.startsWith("image/")) {
-        await processUploadedFile(
-          file,
-          groupId,
-          itemId,
-          uploaderId,
-          newFilename,
-          newPath
-        );
+app.post(
+  "/upload",
+  (req, res, next) => {
+    upload.array("media", 10)(req, res, (err) => {
+      if (err) {
+        if (err.message.includes("demo group")) {
+          return res
+            .status(403)
+            .json({ error: "Uploads are not allowed in demo group!" });
+        }
+        if (err.message.includes("Unknown user")) {
+          return res
+            .status(403)
+            .json({ error: "Unknown user tried to upload, file rejected!" });
+        }
+        if (err.message.includes("Only image files")) {
+          return res
+            .status(400)
+            .json({ error: "Only image files are allowed!" });
+        }
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(413).json({ error: "File too large!" });
+        }
+        if (err.code === "LIMIT_FILE_COUNT") {
+          return res.status(400).json({ error: "Too many files!" });
+        }
+        return res.status(400).json({ error: err.message });
       }
+      next();
     });
+  },
+  async (req, res) => {
+    try {
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ error: "No media files provided!" });
+      }
 
-    await Promise.all(processPromises);
+      // Check if any file is trying to upload to DEMO group
+      const demoUpload = req.files.find((file) => {
+        const groupId = file.originalname.split("-")[0];
+        return groupId === "DEMO";
+      });
 
-    res.json({
-      message: `Successfully uploaded ${req.files.length} media file${
-        req.files.length > 1 ? "s" : ""
-      }!`,
-      success: true
-    });
-  } catch (error) {
-    console.error("Upload error:", error);
-    res.status(500).json({
-      error: "An error occurred while uploading files!",
-      details: error.message
-    });
+      if (demoUpload) {
+        return res
+          .status(403)
+          .json({ error: "Uploads are not allowed in demo group!" });
+      }
+
+      const processPromises = req.files.map(async (file) => {
+        const groupId = file.originalname.split("-")[0];
+        const uploaderId = file.originalname.split("-")[2];
+        const itemId = path
+          .parse(file.originalname)
+          .name.replace(`${groupId}-`, "");
+        const newFilename = `${itemId}.jpg`;
+        const newPath = path.join(path.dirname(file.path), newFilename);
+
+        if (file.mimetype.startsWith("image/")) {
+          await processUploadedFile(
+            file,
+            groupId,
+            itemId,
+            uploaderId,
+            newFilename,
+            newPath
+          );
+        }
+      });
+
+      await Promise.all(processPromises);
+
+      res.json({
+        message: `Successfully uploaded ${req.files.length} media file${
+          req.files.length > 1 ? "s" : ""
+        }!`,
+        success: true
+      });
+    } catch (error) {
+      console.error("Upload error:", error);
+      res.status(500).json({
+        error: "An error occurred while uploading files!",
+        details: error.message
+      });
+    }
   }
-});
+);
 
 app.get("/config/:groupId", (req, res) => {
   try {
