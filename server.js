@@ -31,7 +31,7 @@ app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header(
     "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept"
+    "Origin, X-Requested-With, Content-Type, Accept, Cache-Control"
   );
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
@@ -1516,6 +1516,101 @@ app.post("/users/:groupId/:userId/delete-phone-number", (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+// Group redirect helper functions
+const getGroupRedirects = () => {
+  const redirectsPath = path.join("groups", "redirects.json");
+  if (!fs.existsSync(redirectsPath)) {
+    return [];
+  }
+  try {
+    return JSON.parse(fs.readFileSync(redirectsPath, "utf8"));
+  } catch (error) {
+    console.error("Error reading redirects file:", error);
+    return [];
+  }
+};
+
+const saveGroupRedirects = (redirects) => {
+  const groupsDir = "groups";
+  confirmDirectoryExists(groupsDir);
+  const redirectsPath = path.join(groupsDir, "redirects.json");
+  fs.writeFileSync(redirectsPath, JSON.stringify(redirects, null, 2));
+};
+
+// Group redirect endpoints
+app.get("/check-group-redirect/:groupId", (req, res) => {
+  try {
+    const { groupId } = req.params;
+
+    // Check if this groupId is an old name that should redirect
+    const redirects = getGroupRedirects();
+    const redirect = redirects.find((r) => r.oldGroupId === groupId);
+
+    if (redirect) {
+      return res.json({
+        hasRedirect: true,
+        newGroupId: redirect.newGroupId
+      });
+    }
+
+    // No redirect needed
+    res.json({
+      hasRedirect: false
+    });
+  } catch (error) {
+    console.error("Error checking group redirect:", error);
+    res.status(500).json({
+      hasRedirect: false,
+      error: "Internal server error"
+    });
+  }
+});
+
+app.delete("/group-redirect/:oldGroupId", (req, res) => {
+  try {
+    const { oldGroupId } = req.params;
+
+    const redirects = getGroupRedirects();
+    const filteredRedirects = redirects.filter(
+      (r) => r.oldGroupId !== oldGroupId
+    );
+
+    if (redirects.length === filteredRedirects.length) {
+      return res.status(404).json({
+        error: "Redirect not found"
+      });
+    }
+
+    saveGroupRedirects(filteredRedirects);
+
+    res.json({
+      success: true,
+      message: "Group redirect deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting group redirect:", error);
+    res.status(500).json({
+      error: "Failed to delete group redirect",
+      details: error.message
+    });
+  }
+});
+
+app.get("/group-redirects", (req, res) => {
+  try {
+    const redirects = getGroupRedirects();
+    res.json({
+      redirects
+    });
+  } catch (error) {
+    console.error("Error getting group redirects:", error);
+    res.status(500).json({
+      error: "Failed to get group redirects",
+      details: error.message
     });
   }
 });
