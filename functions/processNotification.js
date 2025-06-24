@@ -96,6 +96,13 @@ const processNotificationForUser = async (
   notification
 ) => {
   const userData = getUser(users, userId);
+
+  // Check if user exists
+  if (!userData || !userData.user) {
+    console.warn(`User ${userId} not found in group ${groupId}`);
+    return;
+  }
+
   const user = userData.user;
 
   const notificationsDir = path.join("groups", groupId, "notifications");
@@ -126,6 +133,7 @@ const processNotificationForUser = async (
   }
 
   if (action === "add") {
+    // Check if user has notification preferences and handle cases where they don't
     if (
       user.notificationPreference === "SMS" &&
       user.phoneNumber &&
@@ -142,6 +150,7 @@ const processNotificationForUser = async (
         }
       });
     }
+    // If user has no notification preference, we silently skip sending notifications
   } else if (action === "remove") {
     notifications = notifications.filter(
       (n) =>
