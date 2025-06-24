@@ -1520,6 +1520,89 @@ app.post("/users/:groupId/:userId/delete-phone-number", (req, res) => {
   }
 });
 
+app.put("/users/:groupId/:userId", (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+    const { name } = req.body;
+
+    if (groupId === "DEMO") {
+      return res.status(403).json({
+        error: "User modifications are not allowed in demo group!"
+      });
+    }
+
+    if (!name || name.trim() === "") {
+      return res.status(400).json({
+        error: "Name is required and cannot be empty"
+      });
+    }
+
+    const users = getGroupUsers(groupId);
+    const user = getUser(users, userId);
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found"
+      });
+    }
+
+    // Update the user's name
+    users[user.index].name = name.trim();
+
+    saveData(groupId, "users/identities", users);
+
+    res.json({
+      success: true,
+      user: users[user.index]
+    });
+  } catch (error) {
+    console.error("Error updating user:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.delete("/users/:groupId/:userId", (req, res) => {
+  try {
+    const { groupId, userId } = req.params;
+
+    if (groupId === "DEMO") {
+      return res.status(403).json({
+        error: "User deletions are not allowed in demo group!"
+      });
+    }
+
+    const users = getGroupUsers(groupId);
+    const user = getUser(users, userId);
+
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found"
+      });
+    }
+
+    // Remove the user from the users array
+    users.splice(user.index, 1);
+
+    saveData(groupId, "users/identities", users);
+
+    res.json({
+      success: true,
+      message: "User deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting user:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Group redirect helper functions
 const getGroupRedirects = () => {
   const redirectsPath = path.join("groups", "redirects.json");
