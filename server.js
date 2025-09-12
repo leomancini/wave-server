@@ -64,6 +64,7 @@ import clearNotificationsQueue from "./functions/clearNotificationsQueue.js";
 import sendPushNotification from "./functions/sendPushNotification.js";
 import sendSMS from "./functions/sendSMS.js";
 import saveData from "./functions/saveData.js";
+import deleteItemsByOwner from "./functions/deleteItemsByOwner.js";
 
 const workerPool = new Set();
 const maxWorkers = Math.max(1, cpus().length - 1);
@@ -758,6 +759,57 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete("/media/:groupId/owner/:ownerId", (req, res) => {
+  try {
+    const { groupId, ownerId } = req.params;
+
+    if (groupId === "DEMO") {
+      return res
+        .status(403)
+        .json({ error: "Item deletions are not allowed in demo group!" });
+    }
+
+    // Validate that the group exists
+    const groupPath = path.join("groups", groupId);
+    if (!fs.existsSync(groupPath)) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+
+    // Validate that the owner exists in the group
+    const users = getGroupUsers(groupId);
+    const ownerExists = users.some((user) => user.id === ownerId);
+    
+    if (!ownerExists) {
+      return res.status(404).json({ error: "Owner not found in group" });
+    }
+
+    // Delete all items owned by the specified user
+    const result = deleteItemsByOwner(groupId, ownerId);
+
+    if (result.errors.length > 0) {
+      return res.status(207).json({
+        success: result.deletedItems.length > 0,
+        message: `Deleted ${result.totalDeleted} items with ${result.errors.length} errors`,
+        deletedItems: result.deletedItems,
+        errors: result.errors,
+        totalDeleted: result.totalDeleted
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Successfully deleted ${result.totalDeleted} items owned by user ${ownerId}`,
+      deletedItems: result.deletedItems,
+      totalDeleted: result.totalDeleted
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to delete items by owner",
+      details: error.message
+    });
   }
 });
 
