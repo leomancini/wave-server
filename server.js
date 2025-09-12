@@ -64,6 +64,7 @@ import clearNotificationsQueue from "./functions/clearNotificationsQueue.js";
 import sendPushNotification from "./functions/sendPushNotification.js";
 import sendSMS from "./functions/sendSMS.js";
 import saveData from "./functions/saveData.js";
+import deleteItem from "./functions/deleteItem.js";
 
 const workerPool = new Set();
 const maxWorkers = Math.max(1, cpus().length - 1);
@@ -758,6 +759,82 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete("/media/:groupId/:itemId", (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const itemId = cleanItemId(req.params.itemId);
+    const { ownerId } = req.body;
+
+    // Prevent deletions in DEMO group
+    if (groupId === "DEMO") {
+      return res.status(403).json({
+        error: "Item deletions are not allowed in demo group!"
+      });
+    }
+
+    // Validate required parameters
+    if (!ownerId) {
+      return res.status(400).json({
+        error: "ownerId is required to delete an item"
+      });
+    }
+
+    // Check if group exists
+    const groupPath = path.join("groups", groupId);
+    if (!fs.existsSync(groupPath)) {
+      return res.status(404).json({
+        error: "Group not found"
+      });
+    }
+
+    // Verify the owner exists in the group
+    const users = getGroupUsers(groupId);
+    const ownerExists = users.some(user => user.id === ownerId);
+    if (!ownerExists) {
+      return res.status(404).json({
+        error: "Owner not found in group"
+      });
+    }
+
+    // Attempt to delete the item
+    const result = deleteItem(groupId, itemId, ownerId);
+
+    if (!result.success) {
+      if (result.error.includes("Owner validation failed")) {
+        return res.status(403).json({
+          error: result.error
+        });
+      } else if (result.error.includes("Item not found")) {
+        return res.status(404).json({
+          error: result.error
+        });
+      } else {
+        return res.status(500).json({
+          error: result.error
+        });
+      }
+    }
+
+    // Return success response
+    const statusCode = result.errors && result.errors.length > 0 ? 207 : 200; // 207 for partial success
+    res.status(statusCode).json({
+      success: true,
+      message: "Item deleted successfully",
+      itemId: result.itemId,
+      ownerId: result.ownerId,
+      deletedFiles: result.deletedFiles,
+      errors: result.errors
+    });
+
+  } catch (error) {
+    console.error("Error deleting item:", error);
+    res.status(500).json({
+      error: "Failed to delete item",
+      details: error.message
+    });
   }
 });
 
