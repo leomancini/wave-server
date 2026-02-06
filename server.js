@@ -133,7 +133,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 100 * 1024 * 1024, // 100MB limit
     files: 10 // Max 10 files per upload
   },
   fileFilter: (req, file, cb) => {
@@ -154,10 +154,10 @@ const upload = multer({
       return;
     }
 
-    if (file.mimetype.startsWith("image/")) {
+    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
       cb(null, true);
     } else {
-      cb(new Error("Only image files are allowed!"));
+      cb(new Error("Only image and video files are allowed!"));
     }
   }
 });
@@ -168,6 +168,20 @@ const cleanItemId = (itemId) => {
     itemId = path.parse(itemId).name;
   }
   return itemId;
+};
+
+const findMediaFile = (groupId, itemId) => {
+  const mediaDir = path.join("groups", groupId, "media");
+  const possibleExtensions = [".jpg", ".mp4", ".mov", ".webm", ".avi"];
+
+  for (const ext of possibleExtensions) {
+    const filePath = path.join(mediaDir, `${itemId}${ext}`);
+    if (fs.existsSync(filePath)) {
+      return filePath;
+    }
+  }
+
+  return null;
 };
 
 // import compressGroupMedia from "./utilities/compress-group-media.js";
@@ -230,43 +244,63 @@ const processUploadedFile = async (
   newFilename,
   newPath
 ) => {
-  const dimensions = await getDimensions(file.path);
+  const isVideo = file.mimetype.startsWith("video/");
 
-  while (workerPool.size >= maxWorkers) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+  if (isVideo) {
+    // For videos, just rename the file without processing
+    fs.renameSync(file.path, newPath);
 
-  await processImage(file.path, newPath, {
-    width: 1920,
-    height: 1080,
-    fit: "inside",
-    withoutEnlargement: true,
-    quality: 85
-  });
+    try {
+      await Promise.all([
+        saveMetadata(groupId, file, itemId, uploaderId, null),
+        updateUnreadItems(groupId, itemId, uploaderId).catch((err) => {
+          console.error("Error updating unread items:", err);
+        })
+      ]);
+    } catch (error) {
+      console.error(`Error processing video ${newFilename}:`, error);
+      throw new Error(`Failed to process ${newFilename}: ${error.message}`);
+    }
+  } else {
+    // Process images as before
+    const dimensions = await getDimensions(file.path);
 
-  fs.unlinkSync(file.path);
+    while (workerPool.size >= maxWorkers) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
 
-  try {
-    await Promise.all([
-      saveMetadata(groupId, file, itemId, uploaderId, dimensions),
-      retry(async () => {
-        await waitForFile(newPath);
-        await generateThumbnail(groupId, newPath, itemId);
-        const thumbnailPath = path.join(
-          "groups",
-          groupId,
-          "thumbnails",
-          `${itemId}.jpg`
-        );
-        await waitForFile(thumbnailPath);
-      }),
-      updateUnreadItems(groupId, itemId, uploaderId).catch((err) => {
-        console.error("Error updating unread items:", err);
-      })
-    ]);
-  } catch (error) {
-    console.error(`Error processing file ${newFilename}:`, error);
-    throw new Error(`Failed to process ${newFilename}: ${error.message}`);
+    await processImage(file.path, newPath, {
+      width: 1920,
+      height: 1080,
+      fit: "inside",
+      withoutEnlargement: true,
+      quality: 85
+    });
+
+    fs.unlinkSync(file.path);
+
+    try {
+      await Promise.all([
+        saveMetadata(groupId, file, itemId, uploaderId, dimensions),
+        retry(async () => {
+          await waitForFile(newPath);
+          await generateThumbnail(groupId, newPath, itemId);
+          const thumbnailPath = path.join(
+            "groups",
+            groupId,
+            "thumbnails",
+            `${itemId}.jpg`
+          );
+          await waitForFile(thumbnailPath);
+        }),
+        updateUnreadItems(groupId, itemId, uploaderId).catch((err) => {
+          console.error("Error updating unread items:", err);
+        })
+      ]);
+    } catch (error) {
+      console.error(`Error processing file ${newFilename}:`, error);
+      throw new Error(`Failed to process ${newFilename}: ${error.message}`);
+    }
   }
 
   processNotification("add", groupId, itemId, uploaderId, null, "upload", null);
@@ -290,10 +324,10 @@ app.post(
             .status(403)
             .json({ error: "Unknown user tried to upload, file rejected!" });
         }
-        if (err.message.includes("Only image files")) {
+        if (err.message.includes("Only image and video files")) {
           return res
             .status(400)
-            .json({ error: "Only image files are allowed!" });
+            .json({ error: "Only image and video files are allowed!" });
         }
         if (err.code === "LIMIT_FILE_SIZE") {
           return res.status(413).json({ error: "File too large!" });
@@ -330,10 +364,20 @@ app.post(
         const itemId = path
           .parse(file.originalname)
           .name.replace(`${groupId}-`, "");
-        const newFilename = `${itemId}.jpg`;
+
+        // Determine file extension based on type
+        let fileExtension;
+        if (file.mimetype.startsWith("image/")) {
+          fileExtension = ".jpg";
+        } else if (file.mimetype.startsWith("video/")) {
+          // Keep original extension for videos
+          fileExtension = path.extname(file.originalname);
+        }
+
+        const newFilename = `${itemId}${fileExtension}`;
         const newPath = path.join(path.dirname(file.path), newFilename);
 
-        if (file.mimetype.startsWith("image/")) {
+        if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
           await processUploadedFile(
             file,
             groupId,
@@ -609,9 +653,9 @@ app.get("/media/:groupId/:itemId", (req, res) => {
   try {
     const { groupId } = req.params;
     const itemId = cleanItemId(req.params.itemId);
-    const filePath = path.join("groups", groupId, "media", `${itemId}.jpg`);
+    const filePath = findMediaFile(groupId, itemId);
 
-    if (!fs.existsSync(filePath)) {
+    if (!filePath) {
       return res.status(404).json({ error: "Media file not found" });
     }
 
@@ -655,8 +699,8 @@ app.post("/media/:groupId/:itemId/reactions", (req, res) => {
         .json({ error: "userId and reaction are required" });
     }
 
-    const mediaPath = path.join("groups", groupId, "media", `${itemId}.jpg`);
-    if (!fs.existsSync(mediaPath)) {
+    const mediaPath = findMediaFile(groupId, itemId);
+    if (!mediaPath) {
       return res.status(404).json({ error: "Media file not found" });
     }
 
@@ -730,8 +774,8 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const mediaPath = path.join("groups", groupId, "media", `${itemId}.jpg`);
-    if (!fs.existsSync(mediaPath)) {
+    const mediaPath = findMediaFile(groupId, itemId);
+    if (!mediaPath) {
       return res.status(404).json({ error: "Media file not found" });
     }
 
