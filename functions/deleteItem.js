@@ -28,13 +28,22 @@ export default (groupId, itemId, requestedOwnerId) => {
     const groupPath = path.join("groups", groupId);
     const deletedFiles = [];
     const errors = [];
-    
+
+    // Find the actual media file (could be .jpg, .mp4, etc.)
+    const mediaDir = path.join(groupPath, "media");
+    const possibleExtensions = [".jpg", ".mp4", ".mov", ".webm", ".avi"];
+    let mediaFilePath = null;
+
+    for (const ext of possibleExtensions) {
+      const testPath = path.join(mediaDir, `${cleanedItemId}${ext}`);
+      if (fs.existsSync(testPath)) {
+        mediaFilePath = testPath;
+        break;
+      }
+    }
+
     // Define all possible files for this item
     const filesToDelete = [
-      {
-        path: path.join(groupPath, "media", `${cleanedItemId}.jpg`),
-        type: "media"
-      },
       {
         path: path.join(groupPath, "thumbnails", `${cleanedItemId}.jpg`),
         type: "thumbnail"
@@ -52,6 +61,14 @@ export default (groupId, itemId, requestedOwnerId) => {
         type: "comments"
       }
     ];
+
+    // Add media file if found
+    if (mediaFilePath) {
+      filesToDelete.unshift({
+        path: mediaFilePath,
+        type: "media"
+      });
+    }
     
     // Delete each file if it exists
     filesToDelete.forEach(({ path: filePath, type }) => {
