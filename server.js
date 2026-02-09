@@ -244,7 +244,8 @@ const getVideoDimensions = (filePath) => {
       [
         "-v", "error",
         "-select_streams", "v:0",
-        "-show_entries", "stream=width,height",
+        "-show_entries", "stream=width,height:stream_side_data=rotation",
+        "-show_entries", "format_tags=rotate",
         "-of", "json",
         filePath
       ],
@@ -253,7 +254,26 @@ const getVideoDimensions = (filePath) => {
         try {
           const data = JSON.parse(stdout);
           const stream = data.streams[0];
-          resolve({ width: stream.width, height: stream.height });
+          let { width, height } = stream;
+
+          // Check for rotation in side_data or format tags
+          let rotation = 0;
+          if (stream.side_data_list) {
+            const rotationData = stream.side_data_list.find(
+              (d) => d.rotation !== undefined
+            );
+            if (rotationData) rotation = Math.abs(rotationData.rotation);
+          }
+          if (!rotation && data.format?.tags?.rotate) {
+            rotation = Math.abs(parseInt(data.format.tags.rotate, 10));
+          }
+
+          // Swap dimensions for portrait videos (90° or 270° rotation)
+          if (rotation === 90 || rotation === 270) {
+            [width, height] = [height, width];
+          }
+
+          resolve({ width, height });
         } catch (e) {
           reject(e);
         }
