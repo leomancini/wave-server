@@ -136,7 +136,7 @@ const upload = multer({
   storage: storage,
   limits: {
     fileSize: 100 * 1024 * 1024, // 100MB limit
-    files: 10 // Max 10 files per upload
+    files: 4 // Max 4 files per upload
   },
   fileFilter: (req, file, cb) => {
     const filename = file.originalname;
@@ -394,7 +394,7 @@ const processUploadedFile = async (
 app.post(
   "/upload",
   (req, res, next) => {
-    upload.array("media", 10)(req, res, (err) => {
+    upload.array("media", 4)(req, res, (err) => {
       if (err) {
         if (err.message.includes("demo group")) {
           return res
