@@ -30,12 +30,20 @@ export default (groupId, itemId, requestedOwnerId) => {
     const errors = [];
     const postId = metadata.postId || cleanedItemId;
 
+    // Find the actual media file (could be .jpg, .mp4, .mov, etc.)
+    const mediaDir = path.join(groupPath, "media");
+    let mediaFilePath = null;
+    if (fs.existsSync(mediaDir)) {
+      const mediaFiles = fs.readdirSync(mediaDir);
+      const match = mediaFiles.find((f) => path.parse(f).name === cleanedItemId);
+      if (match) {
+        mediaFilePath = path.join(mediaDir, match);
+      }
+    }
+
     // Define files for this item (media, thumbnail, metadata)
     const filesToDelete = [
-      {
-        path: path.join(groupPath, "media", `${cleanedItemId}.jpg`),
-        type: "media"
-      },
+      ...(mediaFilePath ? [{ path: mediaFilePath, type: "media" }] : []),
       {
         path: path.join(groupPath, "thumbnails", `${cleanedItemId}.jpg`),
         type: "thumbnail"
