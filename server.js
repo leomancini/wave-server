@@ -66,7 +66,6 @@ import sendSMS from "./functions/sendSMS.js";
 import saveData from "./functions/saveData.js";
 import deleteItem from "./functions/deleteItem.js";
 import groupItemsIntoPosts from "./functions/groupItemsIntoPosts.js";
-import { getVideoDimensions, generateVideoThumbnail } from "./functions/processVideo.js";
 
 const workerPool = new Set();
 const maxWorkers = Math.max(1, cpus().length - 1);
@@ -135,7 +134,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB limit
+    fileSize: 10 * 1024 * 1024, // 10MB limit
     files: 10 // Max 10 files per upload
   },
   fileFilter: (req, file, cb) => {
@@ -156,10 +155,10 @@ const upload = multer({
       return;
     }
 
-    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
+    if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
-      cb(new Error("Only image and video files are allowed!"));
+      cb(new Error("Only image files are allowed!"));
     }
   }
 });
@@ -224,17 +223,6 @@ const waitForFile = async (filePath, maxAttempts = 5, delay = 1000) => {
   );
 };
 
-const getFileExtension = (mimeType) => {
-  const mimeToExt = {
-    "video/mp4": ".mp4",
-    "video/webm": ".webm",
-    "video/quicktime": ".mov",
-    "video/x-msvideo": ".avi",
-    "video/x-matroska": ".mkv"
-  };
-  return mimeToExt[mimeType] || (mimeType.startsWith("video/") ? ".mp4" : ".jpg");
-};
-
 const processUploadedFile = async (
   file,
   groupId,
@@ -244,93 +232,50 @@ const processUploadedFile = async (
   newPath,
   postId
 ) => {
-  const isVideo = file.mimetype.startsWith("video/");
+  const dimensions = await getDimensions(file.path);
 
-  if (isVideo) {
-    const ext = getFileExtension(file.mimetype);
-    newFilename = `${itemId}${ext}`;
-    newPath = path.join(path.dirname(file.path), newFilename);
+  while (workerPool.size >= maxWorkers) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 
-    const dimensions = await getVideoDimensions(file.path);
+  await processImage(file.path, newPath, {
+    width: 1920,
+    height: 1080,
+    fit: "inside",
+    withoutEnlargement: true,
+    quality: 85
+  });
 
-    // Rename the uploaded file to its final name
-    fs.renameSync(file.path, newPath);
+  fs.unlinkSync(file.path);
 
-    try {
-      const tasks = [
-        saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId),
-        retry(async () => {
-          await waitForFile(newPath);
-          await generateVideoThumbnail(newPath, groupId, itemId);
-          const thumbnailPath = path.join(
-            "groups",
-            groupId,
-            "thumbnails",
-            `${itemId}.jpg`
-          );
-          await waitForFile(thumbnailPath);
-        })
-      ];
-
-      if (!postId || itemId === postId) {
-        tasks.push(
-          updateUnreadItems(groupId, postId || itemId, uploaderId).catch((err) => {
-            console.error("Error updating unread items:", err);
-          })
+  try {
+    const tasks = [
+      saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId),
+      retry(async () => {
+        await waitForFile(newPath);
+        await generateThumbnail(groupId, newPath, itemId);
+        const thumbnailPath = path.join(
+          "groups",
+          groupId,
+          "thumbnails",
+          `${itemId}.jpg`
         );
-      }
+        await waitForFile(thumbnailPath);
+      })
+    ];
 
-      await Promise.all(tasks);
-    } catch (error) {
-      console.error(`Error processing file ${newFilename}:`, error);
-      throw new Error(`Failed to process ${newFilename}: ${error.message}`);
-    }
-  } else {
-    const dimensions = await getDimensions(file.path);
-
-    while (workerPool.size >= maxWorkers) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    await processImage(file.path, newPath, {
-      width: 1920,
-      height: 1080,
-      fit: "inside",
-      withoutEnlargement: true,
-      quality: 85
-    });
-
-    fs.unlinkSync(file.path);
-
-    try {
-      const tasks = [
-        saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId),
-        retry(async () => {
-          await waitForFile(newPath);
-          await generateThumbnail(groupId, newPath, itemId);
-          const thumbnailPath = path.join(
-            "groups",
-            groupId,
-            "thumbnails",
-            `${itemId}.jpg`
-          );
-          await waitForFile(thumbnailPath);
+    if (!postId || itemId === postId) {
+      tasks.push(
+        updateUnreadItems(groupId, postId || itemId, uploaderId).catch((err) => {
+          console.error("Error updating unread items:", err);
         })
-      ];
-
-      if (!postId || itemId === postId) {
-        tasks.push(
-          updateUnreadItems(groupId, postId || itemId, uploaderId).catch((err) => {
-            console.error("Error updating unread items:", err);
-          })
-        );
-      }
-
-      await Promise.all(tasks);
-    } catch (error) {
-      console.error(`Error processing file ${newFilename}:`, error);
-      throw new Error(`Failed to process ${newFilename}: ${error.message}`);
+      );
     }
+
+    await Promise.all(tasks);
+  } catch (error) {
+    console.error(`Error processing file ${newFilename}:`, error);
+    throw new Error(`Failed to process ${newFilename}: ${error.message}`);
   }
 
   // Only send notification for the first item in a multi-photo post,
@@ -358,10 +303,10 @@ app.post(
             .status(403)
             .json({ error: "Unknown user tried to upload, file rejected!" });
         }
-        if (err.message.includes("Only image and video files")) {
+        if (err.message.includes("Only image files")) {
           return res
             .status(400)
-            .json({ error: "Only image and video files are allowed!" });
+            .json({ error: "Only image files are allowed!" });
         }
         if (err.code === "LIMIT_FILE_SIZE") {
           return res.status(413).json({ error: "File too large!" });
@@ -406,9 +351,7 @@ app.post(
         const itemId = path
           .parse(file.originalname)
           .name.replace(`${groupId}-`, "");
-        const isVideo = file.mimetype.startsWith("video/");
-        const ext = isVideo ? getFileExtension(file.mimetype) : ".jpg";
-        const newFilename = `${itemId}${ext}`;
+        const newFilename = `${itemId}.jpg`;
         const newPath = path.join(path.dirname(file.path), newFilename);
 
         await processUploadedFile(
@@ -741,26 +684,11 @@ app.get("/media/:groupId", (req, res) => {
 });
 
 const findMediaFile = (groupId, itemId) => {
-  const mediaDir = path.join("groups", groupId, "media");
-  const extensions = [".jpg", ".mp4", ".mov", ".webm", ".avi", ".mkv"];
-  for (const ext of extensions) {
-    const filePath = path.join(mediaDir, `${itemId}${ext}`);
-    if (fs.existsSync(filePath)) {
-      return filePath;
-    }
+  const filePath = path.join("groups", groupId, "media", `${itemId}.jpg`);
+  if (fs.existsSync(filePath)) {
+    return filePath;
   }
   return null;
-};
-
-const mimeTypes = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".mp4": "video/mp4",
-  ".mov": "video/quicktime",
-  ".webm": "video/webm",
-  ".avi": "video/x-msvideo",
-  ".mkv": "video/x-matroska"
 };
 
 app.get("/media/:groupId/:itemId", (req, res) => {
@@ -1644,11 +1572,8 @@ app.get("/media/:groupId/:filename", async (req, res) => {
       return res.status(404).send("File not found or not ready");
     }
 
-    const ext = path.extname(filename).toLowerCase();
-    const contentType = mimeTypes[ext] || "application/octet-stream";
-
     res.setHeader("Cache-Control", "public, max-age=31536000"); // 1 year cache
-    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Type", "image/jpeg");
 
     const stream = fs.createReadStream(filePath);
 
