@@ -7,7 +7,8 @@ export default async (
   itemId,
   uploaderId,
   dimensions,
-  uploadDate
+  uploadDate,
+  postId
 ) => {
   const metadataDir = path.join("groups", groupId, "metadata");
   if (!fs.existsSync(metadataDir)) {
@@ -17,6 +18,7 @@ export default async (
   const metadata = {
     originalName: file.originalname,
     itemId,
+    postId: postId || itemId,
     mimeType: file.mimetype,
     size: file.size,
     uploadDate: uploadDate,
