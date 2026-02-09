@@ -244,7 +244,8 @@ const getVideoDimensions = (filePath) => {
       [
         "-v", "error",
         "-select_streams", "v:0",
-        "-show_entries", "stream=width,height:stream_side_data=rotation",
+        "-show_entries", "stream=width,height",
+        "-show_entries", "stream_side_data=rotation",
         "-show_entries", "format_tags=rotate",
         "-of", "json",
         filePath
