@@ -65,8 +65,6 @@ import sendPushNotification from "./functions/sendPushNotification.js";
 import sendSMS from "./functions/sendSMS.js";
 import saveData from "./functions/saveData.js";
 import deleteItem from "./functions/deleteItem.js";
-import groupItemsIntoPosts from "./functions/groupItemsIntoPosts.js";
-import { getVideoDimensions, generateVideoThumbnail } from "./functions/processVideo.js";
 
 const workerPool = new Set();
 const maxWorkers = Math.max(1, cpus().length - 1);
@@ -135,7 +133,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB limit
+    fileSize: 10 * 1024 * 1024, // 10MB limit
     files: 10 // Max 10 files per upload
   },
   fileFilter: (req, file, cb) => {
@@ -156,10 +154,10 @@ const upload = multer({
       return;
     }
 
-    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
+    if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
-      cb(new Error("Only image and video files are allowed!"));
+      cb(new Error("Only image files are allowed!"));
     }
   }
 });
@@ -224,120 +222,54 @@ const waitForFile = async (filePath, maxAttempts = 5, delay = 1000) => {
   );
 };
 
-const getFileExtension = (mimeType) => {
-  const mimeToExt = {
-    "video/mp4": ".mp4",
-    "video/webm": ".webm",
-    "video/quicktime": ".mov",
-    "video/x-msvideo": ".avi",
-    "video/x-matroska": ".mkv"
-  };
-  return mimeToExt[mimeType] || (mimeType.startsWith("video/") ? ".mp4" : ".jpg");
-};
-
 const processUploadedFile = async (
   file,
   groupId,
   itemId,
   uploaderId,
   newFilename,
-  newPath,
-  postId
+  newPath
 ) => {
-  const isVideo = file.mimetype.startsWith("video/");
+  const dimensions = await getDimensions(file.path);
 
-  if (isVideo) {
-    const ext = getFileExtension(file.mimetype);
-    newFilename = `${itemId}${ext}`;
-    newPath = path.join(path.dirname(file.path), newFilename);
-
-    const dimensions = await getVideoDimensions(file.path);
-
-    // Rename the uploaded file to its final name
-    fs.renameSync(file.path, newPath);
-
-    try {
-      const tasks = [
-        saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId),
-        retry(async () => {
-          await waitForFile(newPath);
-          await generateVideoThumbnail(newPath, groupId, itemId);
-          const thumbnailPath = path.join(
-            "groups",
-            groupId,
-            "thumbnails",
-            `${itemId}.jpg`
-          );
-          await waitForFile(thumbnailPath);
-        })
-      ];
-
-      if (!postId || itemId === postId) {
-        tasks.push(
-          updateUnreadItems(groupId, postId || itemId, uploaderId).catch((err) => {
-            console.error("Error updating unread items:", err);
-          })
-        );
-      }
-
-      await Promise.all(tasks);
-    } catch (error) {
-      console.error(`Error processing file ${newFilename}:`, error);
-      throw new Error(`Failed to process ${newFilename}: ${error.message}`);
-    }
-  } else {
-    const dimensions = await getDimensions(file.path);
-
-    while (workerPool.size >= maxWorkers) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    await processImage(file.path, newPath, {
-      width: 1920,
-      height: 1080,
-      fit: "inside",
-      withoutEnlargement: true,
-      quality: 85
-    });
-
-    fs.unlinkSync(file.path);
-
-    try {
-      const tasks = [
-        saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId),
-        retry(async () => {
-          await waitForFile(newPath);
-          await generateThumbnail(groupId, newPath, itemId);
-          const thumbnailPath = path.join(
-            "groups",
-            groupId,
-            "thumbnails",
-            `${itemId}.jpg`
-          );
-          await waitForFile(thumbnailPath);
-        })
-      ];
-
-      if (!postId || itemId === postId) {
-        tasks.push(
-          updateUnreadItems(groupId, postId || itemId, uploaderId).catch((err) => {
-            console.error("Error updating unread items:", err);
-          })
-        );
-      }
-
-      await Promise.all(tasks);
-    } catch (error) {
-      console.error(`Error processing file ${newFilename}:`, error);
-      throw new Error(`Failed to process ${newFilename}: ${error.message}`);
-    }
+  while (workerPool.size >= maxWorkers) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  // Only send notification for the first item in a multi-photo post,
-  // or for single-photo uploads
-  if (!postId || itemId === postId) {
-    processNotification("add", groupId, postId || itemId, uploaderId, null, "upload", null);
+  await processImage(file.path, newPath, {
+    width: 1920,
+    height: 1080,
+    fit: "inside",
+    withoutEnlargement: true,
+    quality: 85
+  });
+
+  fs.unlinkSync(file.path);
+
+  try {
+    await Promise.all([
+      saveMetadata(groupId, file, itemId, uploaderId, dimensions),
+      retry(async () => {
+        await waitForFile(newPath);
+        await generateThumbnail(groupId, newPath, itemId);
+        const thumbnailPath = path.join(
+          "groups",
+          groupId,
+          "thumbnails",
+          `${itemId}.jpg`
+        );
+        await waitForFile(thumbnailPath);
+      }),
+      updateUnreadItems(groupId, itemId, uploaderId).catch((err) => {
+        console.error("Error updating unread items:", err);
+      })
+    ]);
+  } catch (error) {
+    console.error(`Error processing file ${newFilename}:`, error);
+    throw new Error(`Failed to process ${newFilename}: ${error.message}`);
   }
+
+  processNotification("add", groupId, itemId, uploaderId, null, "upload", null);
 
   file.filename = newFilename;
   file.path = newPath;
@@ -358,10 +290,10 @@ app.post(
             .status(403)
             .json({ error: "Unknown user tried to upload, file rejected!" });
         }
-        if (err.message.includes("Only image and video files")) {
+        if (err.message.includes("Only image files")) {
           return res
             .status(400)
-            .json({ error: "Only image and video files are allowed!" });
+            .json({ error: "Only image files are allowed!" });
         }
         if (err.code === "LIMIT_FILE_SIZE") {
           return res.status(413).json({ error: "File too large!" });
@@ -392,34 +324,25 @@ app.post(
           .json({ error: "Uploads are not allowed in demo group!" });
       }
 
-      // Determine postId: for multi-file uploads, use the first file's itemId
-      const firstFile = req.files[0];
-      const firstGroupId = firstFile.originalname.split("-")[0];
-      const firstItemId = path
-        .parse(firstFile.originalname)
-        .name.replace(`${firstGroupId}-`, "");
-      const postId = req.files.length > 1 ? firstItemId : null;
-
       const processPromises = req.files.map(async (file) => {
         const groupId = file.originalname.split("-")[0];
         const uploaderId = file.originalname.split("-")[2];
         const itemId = path
           .parse(file.originalname)
           .name.replace(`${groupId}-`, "");
-        const isVideo = file.mimetype.startsWith("video/");
-        const ext = isVideo ? getFileExtension(file.mimetype) : ".jpg";
-        const newFilename = `${itemId}${ext}`;
+        const newFilename = `${itemId}.jpg`;
         const newPath = path.join(path.dirname(file.path), newFilename);
 
-        await processUploadedFile(
-          file,
-          groupId,
-          itemId,
-          uploaderId,
-          newFilename,
-          newPath,
-          postId
-        );
+        if (file.mimetype.startsWith("image/")) {
+          await processUploadedFile(
+            file,
+            groupId,
+            itemId,
+            uploaderId,
+            newFilename,
+            newPath
+          );
+        }
       });
 
       await Promise.all(processPromises);
@@ -479,16 +402,7 @@ app.get("/stats/:groupId", (req, res) => {
 
     const mediaPath = path.join(groupPath, "media");
     const mediaFiles = fs.readdirSync(mediaPath);
-
-    // Count posts (not individual photos) by grouping via postId in metadata
-    const postIds = new Set();
-    mediaFiles.forEach((filename) => {
-      const itemId = path.parse(filename).name;
-      const metadata = getMetadataForItem(groupId, itemId);
-      const postId = metadata.postId || itemId;
-      postIds.add(postId);
-    });
-    const mediaCount = postIds.size;
+    const mediaCount = mediaFiles.length;
 
     const reactionsPath = path.join(groupPath, "reactions");
     let totalReactions = 0;
@@ -640,17 +554,19 @@ app.get("/media/:groupId", (req, res) => {
       files.length > 0
         ? files
             .map((filename) => {
-              const itemId = path.parse(filename).name;
-              const filenameParts = itemId.split("-");
+              const filenameParts = filename.split("-");
               if (filenameParts.length < 2) {
                 return null;
               }
 
-              const uploaderId = filenameParts[1];
+              const uploaderId = filenameParts[1].split(".")[0];
               const users = getGroupUsers(groupId, { includeDuplicates: true });
               const uploader = users.find((user) => user.id === uploaderId);
 
+              const itemId = path.parse(filename).name;
               const metadata = getMetadataForItem(groupId, itemId);
+              const reactions = getReactionsForItem(groupId, itemId);
+              const comments = getCommentsForItem(groupId, itemId);
 
               return {
                 filename: filename,
@@ -660,7 +576,9 @@ app.get("/media/:groupId", (req, res) => {
                 },
                 path: `/groups/${groupId}/media/${filename}`,
                 metadata,
-                isUnread: userId ? unreadItems.includes(itemId) || unreadItems.includes(metadata.postId || itemId) : undefined
+                reactions: addUsernames(reactions),
+                comments: addUsernames(comments),
+                isUnread: userId ? unreadItems.includes(itemId) : undefined
               };
             })
             .filter(Boolean)
@@ -668,108 +586,32 @@ app.get("/media/:groupId", (req, res) => {
 
     mediaFiles.sort((a, b) => b.metadata.uploadDate - a.metadata.uploadDate);
 
-    // Group flat items into posts
-    const allPosts = groupItemsIntoPosts(mediaFiles);
-
-    // Sort posts by uploadDate descending
-    allPosts.sort((a, b) => b.uploadDate - a.uploadDate);
-
-    // Enrich posts with aggregated reactions and comments
-    const enrichedPosts = allPosts.map((post) => {
-      // Collect reactions: check post-level file first, then aggregate from items
-      let postReactions = getReactionsForItem(groupId, post.postId);
-      if (postReactions.length === 0 && post.items.length > 1) {
-        // Aggregate from individual items (legacy data)
-        const allReactions = [];
-        for (const item of post.items) {
-          if (item.metadata.itemId !== post.postId) {
-            allReactions.push(
-              ...getReactionsForItem(groupId, item.metadata.itemId)
-            );
-          }
-        }
-        // Deduplicate: keep latest reaction per user
-        const latestByUser = {};
-        for (const r of allReactions) {
-          latestByUser[r.userId] = r;
-        }
-        postReactions = Object.values(latestByUser);
-      }
-
-      // Collect comments: check post-level file first, then aggregate from items
-      let postComments = getCommentsForItem(groupId, post.postId);
-      if (postComments.length === 0 && post.items.length > 1) {
-        // Aggregate from individual items (legacy data)
-        for (const item of post.items) {
-          if (item.metadata.itemId !== post.postId) {
-            postComments.push(
-              ...getCommentsForItem(groupId, item.metadata.itemId)
-            );
-          }
-        }
-        // Sort by timestamp
-        postComments.sort(
-          (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
-        );
-      }
-
-      return {
-        ...post,
-        reactions: addUsernames(postReactions),
-        comments: addUsernames(postComments)
-      };
-    });
-
     const startIndex = (page - 1) * limit;
     const endIndex = page * limit;
-    const totalPages = Math.ceil(enrichedPosts.length / limit);
-    const paginatedPosts = enrichedPosts.slice(startIndex, endIndex);
+    const totalPages = Math.ceil(mediaFiles.length / limit);
+    const paginatedFiles = mediaFiles.slice(startIndex, endIndex);
 
     res.json({
       groupId: groupId,
       mediaCount: mediaFiles.length,
-      postCount: enrichedPosts.length,
       currentPage: page,
       totalPages: totalPages,
       hasMore: page < totalPages,
       hasPrevPage: page > 1,
-      media: paginatedPosts
+      media: paginatedFiles
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-const findMediaFile = (groupId, itemId) => {
-  const mediaDir = path.join("groups", groupId, "media");
-  const extensions = [".jpg", ".mp4", ".mov", ".webm", ".avi", ".mkv"];
-  for (const ext of extensions) {
-    const filePath = path.join(mediaDir, `${itemId}${ext}`);
-    if (fs.existsSync(filePath)) {
-      return filePath;
-    }
-  }
-  return null;
-};
-
-const mimeTypes = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".mp4": "video/mp4",
-  ".mov": "video/quicktime",
-  ".webm": "video/webm",
-  ".avi": "video/x-msvideo",
-  ".mkv": "video/x-matroska"
-};
-
 app.get("/media/:groupId/:itemId", (req, res) => {
   try {
     const { groupId } = req.params;
     const itemId = cleanItemId(req.params.itemId);
-    const filePath = findMediaFile(groupId, itemId);
+    const filePath = path.join("groups", groupId, "media", `${itemId}.jpg`);
 
-    if (!filePath) {
+    if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "Media file not found" });
     }
 
@@ -800,114 +642,6 @@ app.get("/media/:groupId/:itemId/thumbnail", (req, res) => {
   }
 });
 
-app.post("/media/:groupId/post/:postId/reactions", (req, res) => {
-  try {
-    const { groupId, postId } = req.params;
-    const { userId, reaction } = req.body;
-    const uploaderId = postId.split("-")[1];
-
-    if (!userId || !reaction) {
-      return res
-        .status(400)
-        .json({ error: "userId and reaction are required" });
-    }
-
-    const reactionsDir = path.join("groups", groupId, "reactions");
-    confirmDirectoryExists(reactionsDir);
-
-    const reactionsFile = path.join(reactionsDir, `${postId}.json`);
-    let reactions = getReactionsForItem(groupId, postId);
-
-    const existingReaction = reactions.find(
-      (r) => r.userId === userId && r.reaction === reaction
-    );
-    if (existingReaction) {
-      reactions = reactions.filter((r) => r.userId !== userId);
-      processNotification(
-        "remove",
-        groupId,
-        postId,
-        uploaderId,
-        userId,
-        "reaction",
-        null
-      );
-    } else {
-      const hadDifferentReaction = reactions.some((r) => r.userId === userId);
-      reactions = reactions.filter((r) => r.userId !== userId);
-      reactions.push({
-        userId,
-        reaction,
-        timestamp: new Date().toISOString()
-      });
-
-      if (!hadDifferentReaction) {
-        processNotification(
-          "add",
-          groupId,
-          postId,
-          uploaderId,
-          userId,
-          "reaction",
-          { reaction }
-        );
-      }
-    }
-
-    fs.writeFileSync(reactionsFile, JSON.stringify(reactions, null, 2));
-
-    res.json({
-      success: true,
-      reactions: reactions
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post("/media/:groupId/post/:postId/comment", async (req, res) => {
-  try {
-    const { groupId, postId } = req.params;
-    const { userId, comment } = req.body;
-    const uploaderId = postId.split("-")[1];
-
-    if (groupId === "DEMO") {
-      return res
-        .status(403)
-        .json({ error: "Comments are not allowed in demo group!" });
-    }
-
-    if (!userId || !comment) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const commentsDir = path.join("groups", groupId, "comments");
-    confirmDirectoryExists(commentsDir);
-
-    const commentsFile = path.join(commentsDir, `${postId}.json`);
-    let comments = getCommentsForItem(groupId, postId);
-
-    comments.push({
-      userId,
-      comment,
-      timestamp: new Date().toISOString()
-    });
-
-    fs.writeFileSync(commentsFile, JSON.stringify(comments, null, 2));
-
-    processNotification("add", groupId, postId, uploaderId, userId, "comment", {
-      comment
-    });
-
-    res.json({
-      success: true,
-      comments: comments
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 app.post("/media/:groupId/:itemId/reactions", (req, res) => {
   try {
     const { groupId } = req.params;
@@ -921,8 +655,8 @@ app.post("/media/:groupId/:itemId/reactions", (req, res) => {
         .json({ error: "userId and reaction are required" });
     }
 
-    const mediaPath = findMediaFile(groupId, itemId);
-    if (!mediaPath) {
+    const mediaPath = path.join("groups", groupId, "media", `${itemId}.jpg`);
+    if (!fs.existsSync(mediaPath)) {
       return res.status(404).json({ error: "Media file not found" });
     }
 
@@ -996,8 +730,8 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const mediaPath = findMediaFile(groupId, itemId);
-    if (!mediaPath) {
+    const mediaPath = path.join("groups", groupId, "media", `${itemId}.jpg`);
+    if (!fs.existsSync(mediaPath)) {
       return res.status(404).json({ error: "Media file not found" });
     }
 
@@ -1644,11 +1378,8 @@ app.get("/media/:groupId/:filename", async (req, res) => {
       return res.status(404).send("File not found or not ready");
     }
 
-    const ext = path.extname(filename).toLowerCase();
-    const contentType = mimeTypes[ext] || "application/octet-stream";
-
     res.setHeader("Cache-Control", "public, max-age=31536000"); // 1 year cache
-    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Type", "image/jpeg");
 
     const stream = fs.createReadStream(filePath);
 
