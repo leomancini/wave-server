@@ -1,5 +1,3 @@
-const POST_GROUPING_WINDOW_MS = 120000; // 2 minutes
-
 export default (items) => {
   const posts = [];
   const processedItemIds = new Set();
@@ -9,27 +7,12 @@ export default (items) => {
 
     const postId = item.metadata.postId || item.metadata.itemId;
 
-    let postItems;
-    if (item.metadata.postId && item.metadata.postId !== item.metadata.itemId) {
-      // Explicit postId (new multi-photo uploads)
-      postItems = items.filter(
-        (i) =>
-          !processedItemIds.has(i.metadata.itemId) &&
-          i.metadata.postId === postId
-      );
-    } else {
-      // Legacy grouping or single-photo: same uploader, within 2 minutes
-      postItems = items.filter((i) => {
-        if (processedItemIds.has(i.metadata.itemId)) return false;
-        if (i.metadata.postId && i.metadata.postId !== i.metadata.itemId)
-          return false;
-        return (
-          i.metadata.uploaderId === item.metadata.uploaderId &&
-          Math.abs(i.metadata.uploadDate - item.metadata.uploadDate) <=
-            POST_GROUPING_WINDOW_MS
-        );
-      });
-    }
+    // Group items that share the same explicit postId
+    const postItems = items.filter(
+      (i) =>
+        !processedItemIds.has(i.metadata.itemId) &&
+        (i.metadata.postId || i.metadata.itemId) === postId
+    );
 
     // Sort post items by uploadDate ascending (oldest first within the post)
     postItems.sort((a, b) => a.metadata.uploadDate - b.metadata.uploadDate);
