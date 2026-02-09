@@ -55,6 +55,15 @@ export default (groupId, itemId, requestedOwnerId) => {
       }
     ];
 
+    // Also try video extensions for media files
+    const videoExtensions = [".mp4", ".mov", ".webm", ".avi", ".mkv"];
+    for (const ext of videoExtensions) {
+      filesToDelete.push({
+        path: path.join(groupPath, "media", `${cleanedItemId}${ext}`),
+        type: "media"
+      });
+    }
+
     // Delete each file if it exists
     filesToDelete.forEach(({ path: filePath, type }) => {
       try {

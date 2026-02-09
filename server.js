@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import webpush from "web-push";
 import { Worker } from "worker_threads";
 import { cpus } from "os";
+import { execFile } from "child_process";
 
 dotenv.config();
 
@@ -134,7 +135,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 100 * 1024 * 1024, // 100MB limit
     files: 10 // Max 10 files per upload
   },
   fileFilter: (req, file, cb) => {
@@ -155,10 +156,10 @@ const upload = multer({
       return;
     }
 
-    if (file.mimetype.startsWith("image/")) {
+    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
       cb(null, true);
     } else {
-      cb(new Error("Only image files are allowed!"));
+      cb(new Error("Only image and video files are allowed!"));
     }
   }
 });
@@ -223,6 +224,64 @@ const waitForFile = async (filePath, maxAttempts = 5, delay = 1000) => {
   );
 };
 
+const isVideo = (file) => file.mimetype && file.mimetype.startsWith("video/");
+
+const getVideoExtension = (mimetype) => {
+  const map = {
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+    "video/x-msvideo": ".avi",
+    "video/x-matroska": ".mkv"
+  };
+  return map[mimetype] || ".mp4";
+};
+
+const getVideoDimensions = (filePath) => {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "ffprobe",
+      [
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "json",
+        filePath
+      ],
+      (error, stdout) => {
+        if (error) return reject(error);
+        try {
+          const data = JSON.parse(stdout);
+          const stream = data.streams[0];
+          resolve({ width: stream.width, height: stream.height });
+        } catch (e) {
+          reject(e);
+        }
+      }
+    );
+  });
+};
+
+const generateVideoThumbnail = (videoPath, thumbnailPath) => {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "ffmpeg",
+      [
+        "-i", videoPath,
+        "-vframes", "1",
+        "-vf", "scale=100:-1",
+        "-q:v", "10",
+        "-y",
+        thumbnailPath
+      ],
+      (error) => {
+        if (error) return reject(error);
+        resolve(thumbnailPath);
+      }
+    );
+  });
+};
+
 const processUploadedFile = async (
   file,
   groupId,
@@ -232,60 +291,104 @@ const processUploadedFile = async (
   newPath,
   postId
 ) => {
-  const dimensions = await getDimensions(file.path);
+  const isVideoFile = isVideo(file);
 
-  while (workerPool.size >= maxWorkers) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+  if (isVideoFile) {
+    // For videos: keep original file, just rename with proper extension
+    const ext = getVideoExtension(file.mimetype);
+    const videoFilename = `${itemId}${ext}`;
+    const videoPath = path.join(path.dirname(file.path), videoFilename);
+    fs.renameSync(file.path, videoPath);
 
-  await processImage(file.path, newPath, {
-    width: 1920,
-    height: 1080,
-    fit: "inside",
-    withoutEnlargement: true,
-    quality: 85
-  });
+    const dimensions = await getVideoDimensions(videoPath);
 
-  fs.unlinkSync(file.path);
+    try {
+      const thumbnailsDir = path.join("groups", groupId, "thumbnails");
+      if (!fs.existsSync(thumbnailsDir)) {
+        fs.mkdirSync(thumbnailsDir, { recursive: true });
+      }
+      const thumbnailPath = path.join(thumbnailsDir, `${itemId}.jpg`);
 
-  try {
-    const tasks = [
-      saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId),
-      retry(async () => {
-        await waitForFile(newPath);
-        await generateThumbnail(groupId, newPath, itemId);
-        const thumbnailPath = path.join(
-          "groups",
-          groupId,
-          "thumbnails",
-          `${itemId}.jpg`
+      const tasks = [
+        saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId, "video"),
+        generateVideoThumbnail(videoPath, thumbnailPath)
+      ];
+
+      if (!postId || itemId === postId) {
+        tasks.push(
+          updateUnreadItems(groupId, postId || itemId, uploaderId).catch((err) => {
+            console.error("Error updating unread items:", err);
+          })
         );
-        await waitForFile(thumbnailPath);
-      })
-    ];
+      }
 
-    if (!postId || itemId === postId) {
-      tasks.push(
-        updateUnreadItems(groupId, postId || itemId, uploaderId).catch((err) => {
-          console.error("Error updating unread items:", err);
-        })
-      );
+      await Promise.all(tasks);
+    } catch (error) {
+      console.error(`Error processing video ${videoFilename}:`, error);
+      throw new Error(`Failed to process ${videoFilename}: ${error.message}`);
     }
 
-    await Promise.all(tasks);
-  } catch (error) {
-    console.error(`Error processing file ${newFilename}:`, error);
-    throw new Error(`Failed to process ${newFilename}: ${error.message}`);
-  }
+    if (!postId || itemId === postId) {
+      processNotification("add", groupId, postId || itemId, uploaderId, null, "upload", null);
+    }
 
-  // Only send notification for the first item in a multi-photo post,
-  // or for single-photo uploads
-  if (!postId || itemId === postId) {
-    processNotification("add", groupId, postId || itemId, uploaderId, null, "upload", null);
-  }
+    file.filename = videoFilename;
+    file.path = videoPath;
+  } else {
+    // Original image processing
+    const dimensions = await getDimensions(file.path);
 
-  file.filename = newFilename;
-  file.path = newPath;
+    while (workerPool.size >= maxWorkers) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    await processImage(file.path, newPath, {
+      width: 1920,
+      height: 1080,
+      fit: "inside",
+      withoutEnlargement: true,
+      quality: 85
+    });
+
+    fs.unlinkSync(file.path);
+
+    try {
+      const tasks = [
+        saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId),
+        retry(async () => {
+          await waitForFile(newPath);
+          await generateThumbnail(groupId, newPath, itemId);
+          const thumbnailPath = path.join(
+            "groups",
+            groupId,
+            "thumbnails",
+            `${itemId}.jpg`
+          );
+          await waitForFile(thumbnailPath);
+        })
+      ];
+
+      if (!postId || itemId === postId) {
+        tasks.push(
+          updateUnreadItems(groupId, postId || itemId, uploaderId).catch((err) => {
+            console.error("Error updating unread items:", err);
+          })
+        );
+      }
+
+      await Promise.all(tasks);
+    } catch (error) {
+      console.error(`Error processing file ${newFilename}:`, error);
+      throw new Error(`Failed to process ${newFilename}: ${error.message}`);
+    }
+
+    if (!postId || itemId === postId) {
+      processNotification("add", groupId, postId || itemId, uploaderId, null, "upload", null);
+    }
+
+    file.filename = newFilename;
+    file.path = newPath;
+  }
 };
 
 app.post(
@@ -303,10 +406,10 @@ app.post(
             .status(403)
             .json({ error: "Unknown user tried to upload, file rejected!" });
         }
-        if (err.message.includes("Only image files")) {
+        if (err.message.includes("Only image and video files")) {
           return res
             .status(400)
-            .json({ error: "Only image files are allowed!" });
+            .json({ error: "Only image and video files are allowed!" });
         }
         if (err.code === "LIMIT_FILE_SIZE") {
           return res.status(413).json({ error: "File too large!" });
@@ -683,10 +786,18 @@ app.get("/media/:groupId", (req, res) => {
   }
 });
 
+const VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm", ".avi", ".mkv"];
+
 const findMediaFile = (groupId, itemId) => {
-  const filePath = path.join("groups", groupId, "media", `${itemId}.jpg`);
-  if (fs.existsSync(filePath)) {
-    return filePath;
+  const jpgPath = path.join("groups", groupId, "media", `${itemId}.jpg`);
+  if (fs.existsSync(jpgPath)) {
+    return jpgPath;
+  }
+  for (const ext of VIDEO_EXTENSIONS) {
+    const videoPath = path.join("groups", groupId, "media", `${itemId}${ext}`);
+    if (fs.existsSync(videoPath)) {
+      return videoPath;
+    }
   }
   return null;
 };
@@ -699,6 +810,19 @@ app.get("/media/:groupId/:itemId", (req, res) => {
 
     if (!filePath) {
       return res.status(404).json({ error: "Media file not found" });
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const videoContentTypes = {
+      ".mp4": "video/mp4",
+      ".mov": "video/quicktime",
+      ".webm": "video/webm",
+      ".avi": "video/x-msvideo",
+      ".mkv": "video/x-matroska"
+    };
+
+    if (videoContentTypes[ext]) {
+      res.setHeader("Content-Type", videoContentTypes[ext]);
     }
 
     res.sendFile(path.resolve(filePath));
@@ -1572,8 +1696,17 @@ app.get("/media/:groupId/:filename", async (req, res) => {
       return res.status(404).send("File not found or not ready");
     }
 
+    const ext = path.extname(filePath).toLowerCase();
+    const videoContentTypes = {
+      ".mp4": "video/mp4",
+      ".mov": "video/quicktime",
+      ".webm": "video/webm",
+      ".avi": "video/x-msvideo",
+      ".mkv": "video/x-matroska"
+    };
+
     res.setHeader("Cache-Control", "public, max-age=31536000"); // 1 year cache
-    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("Content-Type", videoContentTypes[ext] || "image/jpeg");
 
     const stream = fs.createReadStream(filePath);
 
