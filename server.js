@@ -59,6 +59,7 @@ import processNotification from "./functions/processNotification.js";
 import getMetadataForItem from "./functions/getMetadataForItem.js";
 import getReactionsForItem from "./functions/getReactionsForItem.js";
 import getCommentsForItem from "./functions/getCommentsForItem.js";
+import getReactionsForComment from "./functions/getReactionsForComment.js";
 import getUnsentNotificationsForUser from "./functions/getUnsentNotificationsForUser.js";
 import generateNotificationsSummary from "./functions/generateNotificationsSummary.js";
 import clearNotificationsQueue from "./functions/clearNotificationsQueue.js";
@@ -156,6 +157,33 @@ const upload = multer({
       return;
     }
 
+    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image and video files are allowed!"));
+    }
+  }
+});
+
+const commentMediaStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const { groupId } = req.params;
+    const uploadDir = path.join("groups", groupId, "comment-media");
+    confirmDirectoryExists(uploadDir);
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, file.originalname);
+  }
+});
+
+const commentMediaUpload = multer({
+  storage: commentMediaStorage,
+  limits: {
+    fileSize: 100 * 1024 * 1024,
+    files: 1
+  },
+  fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
       cb(null, true);
     } else {
@@ -791,10 +819,19 @@ app.get("/media/:groupId", (req, res) => {
         );
       }
 
+      // Enrich comments with their reactions
+      const commentsWithReactions = addUsernames(postComments).map((comment, index) => {
+        const commentReactions = getReactionsForComment(groupId, post.postId, index);
+        return {
+          ...comment,
+          reactions: addUsernames(commentReactions)
+        };
+      });
+
       return {
         ...post,
         reactions: addUsernames(postReactions),
-        comments: addUsernames(postComments)
+        comments: commentsWithReactions
       };
     });
 
@@ -884,6 +921,164 @@ app.get("/media/:groupId/:itemId/thumbnail", (req, res) => {
   }
 });
 
+// Comment media serving
+const findCommentMediaFile = (groupId, mediaId) => {
+  const jpgPath = path.join("groups", groupId, "comment-media", `${mediaId}.jpg`);
+  if (fs.existsSync(jpgPath)) return jpgPath;
+  for (const ext of VIDEO_EXTENSIONS) {
+    const videoPath = path.join("groups", groupId, "comment-media", `${mediaId}${ext}`);
+    if (fs.existsSync(videoPath)) return videoPath;
+  }
+  return null;
+};
+
+app.get("/comment-media/:groupId/:mediaId", (req, res) => {
+  try {
+    const { groupId, mediaId } = req.params;
+    const filePath = findCommentMediaFile(groupId, mediaId);
+
+    if (!filePath) {
+      return res.status(404).json({ error: "Comment media not found" });
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const videoContentTypes = {
+      ".mp4": "video/mp4",
+      ".mov": "video/quicktime",
+      ".webm": "video/webm",
+      ".avi": "video/x-msvideo",
+      ".mkv": "video/x-matroska"
+    };
+
+    if (videoContentTypes[ext]) {
+      res.setHeader("Content-Type", videoContentTypes[ext]);
+    }
+
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/comment-media/:groupId/:mediaId/thumbnail", (req, res) => {
+  try {
+    const { groupId, mediaId } = req.params;
+    const thumbnailPath = path.join(
+      "groups",
+      groupId,
+      "comment-media",
+      "thumbnails",
+      `${mediaId}.jpg`
+    );
+
+    if (!fs.existsSync(thumbnailPath)) {
+      return res.status(404).json({ error: "Thumbnail not found" });
+    }
+
+    res.sendFile(path.resolve(thumbnailPath));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Comment media upload
+app.post(
+  "/media/:groupId/post/:postId/comment-media",
+  (req, res, next) => {
+    commentMediaUpload.single("media")(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({ error: err.message });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      const { groupId } = req.params;
+      const { userId } = req.body;
+
+      if (groupId === "DEMO") {
+        return res.status(403).json({ error: "Not allowed in demo group!" });
+      }
+
+      if (!userId || !req.file) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      const isKnownUser = getGroupUsers(groupId).some((u) => u.id === userId);
+      if (!isKnownUser) {
+        return res.status(403).json({ error: "Unknown user" });
+      }
+
+      const file = req.file;
+      const mediaId = `${Date.now()}-${userId}-${Math.floor(Math.random() * 10000000000)}`;
+      const isVideoFile = isVideo(file);
+
+      if (isVideoFile) {
+        const ext = getVideoExtension(file.mimetype);
+        const videoFilename = `${mediaId}${ext}`;
+        const videoPath = path.join(path.dirname(file.path), videoFilename);
+        fs.renameSync(file.path, videoPath);
+
+        let dimensions;
+        try {
+          dimensions = await getVideoDimensions(videoPath);
+        } catch (e) {
+          dimensions = { width: 1920, height: 1080 };
+        }
+
+        const thumbnailsDir = path.join("groups", groupId, "comment-media", "thumbnails");
+        confirmDirectoryExists(thumbnailsDir);
+        const thumbnailPath = path.join(thumbnailsDir, `${mediaId}.jpg`);
+        await generateVideoThumbnail(videoPath, thumbnailPath);
+
+        res.json({ success: true, mediaId, mediaType: "video", dimensions });
+      } else {
+        const newFilename = `${mediaId}.jpg`;
+        const newPath = path.join(path.dirname(file.path), newFilename);
+        const dimensions = await getDimensions(file.path);
+
+        while (workerPool.size >= maxWorkers) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        await processImage(file.path, newPath, {
+          width: 1920,
+          height: 1080,
+          fit: "inside",
+          withoutEnlargement: true,
+          quality: 85
+        });
+
+        fs.unlinkSync(file.path);
+
+        const thumbnailsDir = path.join("groups", groupId, "comment-media", "thumbnails");
+        confirmDirectoryExists(thumbnailsDir);
+        const thumbnailPath = path.join(thumbnailsDir, `${mediaId}.jpg`);
+
+        await retry(async () => {
+          await waitForFile(newPath);
+          const sharp = (await import("sharp")).default;
+          const { width, height } = await sharp(newPath).metadata();
+          const aspectRatio = width / height;
+          await sharp(newPath, { failOnError: true, timeout: 30000 })
+            .resize(100, Math.round(100 / aspectRatio), {
+              fit: "contain",
+              position: "centre"
+            })
+            .jpeg({ quality: 25, progressive: true })
+            .toFile(thumbnailPath);
+        });
+
+        res.json({ success: true, mediaId, mediaType: "image", dimensions });
+      }
+    } catch (error) {
+      console.error("Comment media upload error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
 app.post("/media/:groupId/post/:postId/reactions", (req, res) => {
   try {
     const { groupId, postId } = req.params;
@@ -952,7 +1147,7 @@ app.post("/media/:groupId/post/:postId/reactions", (req, res) => {
 app.post("/media/:groupId/post/:postId/comment", async (req, res) => {
   try {
     const { groupId, postId } = req.params;
-    const { userId, comment } = req.body;
+    const { userId, comment, media } = req.body;
     const uploaderId = postId.split("-")[1];
 
     if (groupId === "DEMO") {
@@ -961,7 +1156,7 @@ app.post("/media/:groupId/post/:postId/comment", async (req, res) => {
         .json({ error: "Comments are not allowed in demo group!" });
     }
 
-    if (!userId || !comment) {
+    if (!userId || (!comment && !media)) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
@@ -971,21 +1166,98 @@ app.post("/media/:groupId/post/:postId/comment", async (req, res) => {
     const commentsFile = path.join(commentsDir, `${postId}.json`);
     let comments = getCommentsForItem(groupId, postId);
 
-    comments.push({
+    const commentObj = {
       userId,
-      comment,
+      comment: comment || "",
       timestamp: new Date().toISOString()
-    });
+    };
+
+    if (media && media.mediaId && media.mediaType) {
+      commentObj.media = {
+        mediaId: media.mediaId,
+        mediaType: media.mediaType,
+        dimensions: media.dimensions || null
+      };
+    }
+
+    comments.push(commentObj);
 
     fs.writeFileSync(commentsFile, JSON.stringify(comments, null, 2));
 
     processNotification("add", groupId, postId, uploaderId, userId, "comment", {
-      comment
+      comment: comment || ""
     });
 
     res.json({
       success: true,
       comments: comments
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/media/:groupId/post/:postId/comment/:commentIndex/reactions", (req, res) => {
+  try {
+    const { groupId, postId, commentIndex } = req.params;
+    const { userId, reaction } = req.body;
+    const index = parseInt(commentIndex);
+
+    if (!userId || !reaction) {
+      return res
+        .status(400)
+        .json({ error: "userId and reaction are required" });
+    }
+
+    if (isNaN(index) || index < 0) {
+      return res.status(400).json({ error: "Invalid comment index" });
+    }
+
+    // Get the comment to find the comment author
+    const comments = getCommentsForItem(groupId, postId);
+    if (index >= comments.length) {
+      return res.status(404).json({ error: "Comment not found" });
+    }
+    const commentAuthorId = comments[index].userId;
+
+    const commentReactionsDir = path.join("groups", groupId, "comment-reactions");
+    confirmDirectoryExists(commentReactionsDir);
+
+    const reactionsFile = path.join(commentReactionsDir, `${postId}-${index}.json`);
+    let reactions = getReactionsForComment(groupId, postId, index);
+
+    const existingReaction = reactions.find(
+      (r) => r.userId === userId && r.reaction === reaction
+    );
+    if (existingReaction) {
+      reactions = reactions.filter((r) => r.userId !== userId);
+    } else {
+      const hadDifferentReaction = reactions.some((r) => r.userId === userId);
+      reactions = reactions.filter((r) => r.userId !== userId);
+      reactions.push({
+        userId,
+        reaction,
+        timestamp: new Date().toISOString()
+      });
+
+      if (!hadDifferentReaction && userId !== commentAuthorId) {
+        processNotification(
+          "add",
+          groupId,
+          postId,
+          commentAuthorId,
+          userId,
+          "comment-reaction",
+          { reaction }
+        );
+      }
+    }
+
+    fs.writeFileSync(reactionsFile, JSON.stringify(reactions, null, 2));
+
+    res.json({
+      success: true,
+      reactions: reactions
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1067,7 +1339,7 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
   try {
     const { groupId } = req.params;
     const itemId = cleanItemId(req.params.itemId);
-    const { userId, comment } = req.body;
+    const { userId, comment, media } = req.body;
     const uploaderId = itemId.split("-")[1];
 
     if (groupId === "DEMO") {
@@ -1076,7 +1348,7 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
         .json({ error: "Comments are not allowed in demo group!" });
     }
 
-    if (!userId || !comment) {
+    if (!userId || (!comment && !media)) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
@@ -1091,16 +1363,26 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
     const commentsFile = path.join(commentsDir, `${itemId}.json`);
     let comments = getCommentsForItem(groupId, itemId);
 
-    comments.push({
+    const commentObj = {
       userId,
-      comment,
+      comment: comment || "",
       timestamp: new Date().toISOString()
-    });
+    };
+
+    if (media && media.mediaId && media.mediaType) {
+      commentObj.media = {
+        mediaId: media.mediaId,
+        mediaType: media.mediaType,
+        dimensions: media.dimensions || null
+      };
+    }
+
+    comments.push(commentObj);
 
     fs.writeFileSync(commentsFile, JSON.stringify(comments, null, 2));
 
     processNotification("add", groupId, itemId, uploaderId, userId, "comment", {
-      comment
+      comment: comment || ""
     });
 
     res.json({

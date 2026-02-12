@@ -125,6 +125,27 @@ export default (groupId, itemId, requestedOwnerId) => {
             errors.push({ type, path: filePath, error: error.message });
           }
         });
+
+        // Delete comment-reaction files for this post
+        const commentReactionsDir = path.join(groupPath, "comment-reactions");
+        if (fs.existsSync(commentReactionsDir)) {
+          try {
+            const crFiles = fs.readdirSync(commentReactionsDir);
+            crFiles
+              .filter((f) => f.startsWith(`${postId}-`))
+              .forEach((f) => {
+                try {
+                  const crPath = path.join(commentReactionsDir, f);
+                  fs.unlinkSync(crPath);
+                  deletedFiles.push({ type: "comment-reactions", path: crPath });
+                } catch (error) {
+                  errors.push({ type: "comment-reactions", path: f, error: error.message });
+                }
+              });
+          } catch (error) {
+            errors.push({ type: "comment-reactions", error: error.message });
+          }
+        }
       }
     }
 

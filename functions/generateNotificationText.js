@@ -11,6 +11,9 @@ export default (notification) => {
 
     case "comment-on-post-you-commented-on":
       return `${notification.user.name} also commented on a post you commented on: "${notification.content.comment}"`;
+
+    case "reaction-on-your-comment":
+      return `${notification.user.name} reacted ${notification.content.reaction} to your comment.`;
   }
 
   return "";

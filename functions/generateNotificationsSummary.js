@@ -26,6 +26,11 @@ export default (groupId, userId, notifications) => {
           users
         )} also commented on ${itemText} that you commented on`;
 
+      case "reaction-on-your-comment":
+        return `${formatUserList(users)} reacted to your ${
+          itemCount > 1 ? "comments" : "comment"
+        }`;
+
       case "upload":
         const contentCount = group.length;
         return `${formatUserList(users)} added ${

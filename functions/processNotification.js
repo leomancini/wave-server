@@ -85,6 +85,17 @@ export default async (
         constructNotificationData(groupId, itemId, userId, type, content)
       );
     }
+  } else if (type === "comment-reaction") {
+    // Send notification to the comment author (uploaderId is used as commentAuthorId here)
+    if (userId !== uploaderId) {
+      processNotificationForUser(
+        "add",
+        users,
+        groupId,
+        uploaderId,
+        constructNotificationData(groupId, itemId, userId, "reaction-on-your-comment", content)
+      );
+    }
   }
 };
 
