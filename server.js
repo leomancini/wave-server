@@ -309,7 +309,8 @@ const processUploadedFile = async (
   uploaderId,
   newFilename,
   newPath,
-  postId
+  postId,
+  orderIndex
 ) => {
   const isVideoFile = isVideo(file);
 
@@ -330,7 +331,7 @@ const processUploadedFile = async (
       const thumbnailPath = path.join(thumbnailsDir, `${itemId}.jpg`);
 
       const tasks = [
-        saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId, "video"),
+        saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId, "video", orderIndex),
         generateVideoThumbnail(videoPath, thumbnailPath)
       ];
 
@@ -374,7 +375,7 @@ const processUploadedFile = async (
 
     try {
       const tasks = [
-        saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId),
+        saveMetadata(groupId, file, itemId, uploaderId, dimensions, null, postId, undefined, orderIndex),
         retry(async () => {
           await waitForFile(newPath);
           await generateThumbnail(groupId, newPath, itemId);
@@ -468,6 +469,16 @@ app.post(
         .name.replace(`${firstGroupId}-`, "");
       const postId = req.files.length > 1 ? firstItemId : null;
 
+      // Parse order indexes for multi-photo posts
+      let orderIndexes = {};
+      if (req.body.orderIndexes) {
+        try {
+          orderIndexes = JSON.parse(req.body.orderIndexes);
+        } catch (e) {
+          // Ignore parse errors, fall back to no ordering
+        }
+      }
+
       const processPromises = req.files.map(async (file) => {
         const groupId = file.originalname.split("-")[0];
         const uploaderId = file.originalname.split("-")[2];
@@ -484,7 +495,8 @@ app.post(
           uploaderId,
           newFilename,
           newPath,
-          postId
+          postId,
+          orderIndexes[itemId]
         );
       });
 

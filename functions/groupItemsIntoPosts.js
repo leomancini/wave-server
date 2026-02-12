@@ -14,8 +14,15 @@ export default (items) => {
         (i.metadata.postId || i.metadata.itemId) === postId
     );
 
-    // Sort post items by uploadDate ascending (oldest first within the post)
-    postItems.sort((a, b) => a.metadata.uploadDate - b.metadata.uploadDate);
+    // Sort post items by orderIndex if available, otherwise by uploadDate ascending
+    postItems.sort((a, b) => {
+      const aOrder = a.metadata.orderIndex;
+      const bOrder = b.metadata.orderIndex;
+      if (aOrder !== undefined && bOrder !== undefined) {
+        return aOrder - bOrder;
+      }
+      return a.metadata.uploadDate - b.metadata.uploadDate;
+    });
 
     postItems.forEach((i) => processedItemIds.add(i.metadata.itemId));
 

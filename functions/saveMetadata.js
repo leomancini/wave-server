@@ -9,7 +9,8 @@ export default async (
   dimensions,
   uploadDate,
   postId,
-  mediaType
+  mediaType,
+  orderIndex
 ) => {
   const metadataDir = path.join("groups", groupId, "metadata");
   if (!fs.existsSync(metadataDir)) {
@@ -30,6 +31,10 @@ export default async (
 
   if (mediaType === "video") {
     metadata.mediaType = "video";
+  }
+
+  if (orderIndex !== undefined) {
+    metadata.orderIndex = orderIndex;
   }
 
   fs.writeFileSync(
