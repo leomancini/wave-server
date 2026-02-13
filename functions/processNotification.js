@@ -157,7 +157,10 @@ const processNotificationForUser = async (
         body: generateNotificationText(notification),
         url: `${process.env.CLIENT_URL}/${groupId}/${userId}#${notification.itemId}`,
         data: {
-          itemId: notification.itemId
+          itemId: notification.itemId,
+          ...(notification.content?.commentIndex !== undefined && {
+            commentIndex: notification.content.commentIndex
+          })
         }
       });
     }

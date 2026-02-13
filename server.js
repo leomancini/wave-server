@@ -1248,7 +1248,7 @@ app.post("/media/:groupId/post/:postId/comment/:commentIndex/reactions", (req, r
           commentAuthorId,
           userId,
           "comment-reaction",
-          { reaction }
+          { reaction, commentIndex: index }
         );
       }
     }
