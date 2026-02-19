@@ -73,6 +73,28 @@ export default async (
         )
       );
     });
+    // Send mention notifications to @mentioned users who aren't already being notified
+    const mentionedUserIds = extractMentionedUserIds(content?.comment || "", users);
+    const alreadyNotifiedIds = new Set([uploaderId, userId, ...uniqueUserIds]);
+
+    mentionedUserIds.forEach((mentionedUserId) => {
+      if (!alreadyNotifiedIds.has(mentionedUserId)) {
+        processNotificationForUser(
+          "add",
+          users,
+          groupId,
+          mentionedUserId,
+          constructNotificationData(
+            groupId,
+            itemId,
+            userId,
+            "mention",
+            content
+          )
+        );
+        alreadyNotifiedIds.add(mentionedUserId);
+      }
+    });
   } else if (type === "reaction") {
     // Add to or remove from queue for uploader,
     // if the reactor is not the uploader
@@ -177,6 +199,32 @@ const processNotificationForUser = async (
   }
 
   fs.writeFileSync(notificationPath, JSON.stringify(notifications, null, 2));
+};
+
+const extractMentionedUserIds = (commentText, users) => {
+  if (!commentText || !users || users.length === 0) return [];
+
+  const sortedUsers = [...users].sort((a, b) => b.name.length - a.name.length);
+  const mentionedIds = [];
+  const atRegex = /@/g;
+  let match;
+
+  while ((match = atRegex.exec(commentText)) !== null) {
+    const afterAt = commentText.slice(match.index + 1);
+    for (const user of sortedUsers) {
+      if (afterAt.toLowerCase().startsWith(user.name.toLowerCase())) {
+        const charAfter = afterAt[user.name.length];
+        if (!charAfter || /[^a-zA-Z0-9]/.test(charAfter)) {
+          if (!mentionedIds.includes(user.id)) {
+            mentionedIds.push(user.id);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return mentionedIds;
 };
 
 const constructNotificationData = (groupId, itemId, userId, type, content) => {

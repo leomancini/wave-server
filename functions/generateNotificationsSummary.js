@@ -37,6 +37,9 @@ export default (groupId, userId, notifications) => {
           contentCount > 1 ? "posts" : "a post"
         }`;
 
+      case "mention":
+        return `${formatUserList(users)} mentioned you in a comment`;
+
       default:
         return `Unknown: ${type}`;
     }
