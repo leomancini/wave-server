@@ -71,6 +71,8 @@ import groupItemsIntoPosts from "./functions/groupItemsIntoPosts.js";
 import generateClaudeResponse from "./functions/generateClaudeResponse.js";
 import ensureClaudeUser, { getClaudeUserId } from "./functions/ensureClaudeUser.js";
 import getGroupStats from "./functions/getGroupStats.js";
+import { findMediaFile, findCommentMediaFile, VIDEO_EXTENSIONS } from "./functions/findMediaFile.js";
+import collectPostMedia from "./functions/collectPostMedia.js";
 
 const workerPool = new Set();
 const maxWorkers = Math.max(1, cpus().length - 1);
@@ -858,22 +860,6 @@ app.get("/media/:groupId", (req, res) => {
   }
 });
 
-const VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm", ".avi", ".mkv"];
-
-const findMediaFile = (groupId, itemId) => {
-  const jpgPath = path.join("groups", groupId, "media", `${itemId}.jpg`);
-  if (fs.existsSync(jpgPath)) {
-    return jpgPath;
-  }
-  for (const ext of VIDEO_EXTENSIONS) {
-    const videoPath = path.join("groups", groupId, "media", `${itemId}${ext}`);
-    if (fs.existsSync(videoPath)) {
-      return videoPath;
-    }
-  }
-  return null;
-};
-
 app.get("/media/:groupId/:itemId", (req, res) => {
   try {
     const { groupId } = req.params;
@@ -923,17 +909,6 @@ app.get("/media/:groupId/:itemId/thumbnail", (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
-// Comment media serving
-const findCommentMediaFile = (groupId, mediaId) => {
-  const jpgPath = path.join("groups", groupId, "comment-media", `${mediaId}.jpg`);
-  if (fs.existsSync(jpgPath)) return jpgPath;
-  for (const ext of VIDEO_EXTENSIONS) {
-    const videoPath = path.join("groups", groupId, "comment-media", `${mediaId}${ext}`);
-    if (fs.existsSync(videoPath)) return videoPath;
-  }
-  return null;
-};
 
 app.get("/comment-media/:groupId/:mediaId", (req, res) => {
   try {
@@ -1209,10 +1184,19 @@ app.post("/media/:groupId/post/:postId/comment", async (req, res) => {
           }));
 
           const stats = getGroupStats(groupId);
+
+          let mediaContentBlocks = [];
+          try {
+            mediaContentBlocks = await collectPostMedia(groupId, postId);
+          } catch (err) {
+            console.error("Error collecting post media for Claude:", err);
+          }
+
           const reply = await generateClaudeResponse(comment, commentsWithNames, {
             groupId,
             users,
-            stats
+            stats,
+            mediaContentBlocks
           });
 
           const currentComments = getCommentsForItem(groupId, postId);
@@ -1474,10 +1458,19 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
           }));
 
           const stats = getGroupStats(groupId);
+
+          let mediaContentBlocks = [];
+          try {
+            mediaContentBlocks = await collectPostMedia(groupId, itemId);
+          } catch (err) {
+            console.error("Error collecting post media for Claude:", err);
+          }
+
           const reply = await generateClaudeResponse(comment, commentsWithNames, {
             groupId,
             users,
-            stats
+            stats,
+            mediaContentBlocks
           });
 
           const currentComments = getCommentsForItem(groupId, itemId);
