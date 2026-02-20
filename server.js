@@ -68,6 +68,8 @@ import sendSMS from "./functions/sendSMS.js";
 import saveData from "./functions/saveData.js";
 import deleteItem from "./functions/deleteItem.js";
 import groupItemsIntoPosts from "./functions/groupItemsIntoPosts.js";
+import generateClaudeResponse from "./functions/generateClaudeResponse.js";
+import ensureClaudeUser, { getClaudeUserId } from "./functions/ensureClaudeUser.js";
 
 const workerPool = new Set();
 const maxWorkers = Math.max(1, cpus().length - 1);
@@ -1188,6 +1190,37 @@ app.post("/media/:groupId/post/:postId/comment", async (req, res) => {
       comment: comment || ""
     });
 
+    // Check if the comment mentions @Claude and generate a reply
+    if (comment && /@claude\b/i.test(comment)) {
+      (async () => {
+        try {
+          const claudeUser = ensureClaudeUser(groupId);
+          const enrichedComments = getCommentsForItem(groupId, postId);
+          const users = getGroupUsers(groupId, { includeDuplicates: true });
+          const commentsWithNames = enrichedComments.map((c) => ({
+            ...c,
+            user: users.find((u) => u.id === c.userId) || {
+              id: c.userId,
+              name: "Unknown"
+            }
+          }));
+
+          const reply = await generateClaudeResponse(comment, commentsWithNames);
+
+          const currentComments = getCommentsForItem(groupId, postId);
+          currentComments.push({
+            userId: claudeUser.id,
+            comment: reply,
+            timestamp: new Date().toISOString()
+          });
+
+          fs.writeFileSync(commentsFile, JSON.stringify(currentComments, null, 2));
+        } catch (err) {
+          console.error("Error generating Claude reply:", err);
+        }
+      })();
+    }
+
     res.json({
       success: true,
       comments: comments
@@ -1384,6 +1417,37 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
     processNotification("add", groupId, itemId, uploaderId, userId, "comment", {
       comment: comment || ""
     });
+
+    // Check if the comment mentions @Claude and generate a reply
+    if (comment && /@claude\b/i.test(comment)) {
+      (async () => {
+        try {
+          const claudeUser = ensureClaudeUser(groupId);
+          const enrichedComments = getCommentsForItem(groupId, itemId);
+          const users = getGroupUsers(groupId, { includeDuplicates: true });
+          const commentsWithNames = enrichedComments.map((c) => ({
+            ...c,
+            user: users.find((u) => u.id === c.userId) || {
+              id: c.userId,
+              name: "Unknown"
+            }
+          }));
+
+          const reply = await generateClaudeResponse(comment, commentsWithNames);
+
+          const currentComments = getCommentsForItem(groupId, itemId);
+          currentComments.push({
+            userId: claudeUser.id,
+            comment: reply,
+            timestamp: new Date().toISOString()
+          });
+
+          fs.writeFileSync(commentsFile, JSON.stringify(currentComments, null, 2));
+        } catch (err) {
+          console.error("Error generating Claude reply:", err);
+        }
+      })();
+    }
 
     res.json({
       success: true,
