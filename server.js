@@ -1191,7 +1191,9 @@ app.post("/media/:groupId/post/:postId/comment", async (req, res) => {
     });
 
     // Check if the comment mentions @Claude and generate a reply
-    if (comment && /@claude\b/i.test(comment)) {
+    const claudeReplyPending = !!(comment && /@claude\b/i.test(comment));
+    if (claudeReplyPending) {
+      const requestTimestamp = new Date().toISOString();
       (async () => {
         try {
           const claudeUser = ensureClaudeUser(groupId);
@@ -1223,7 +1225,8 @@ app.post("/media/:groupId/post/:postId/comment", async (req, res) => {
 
     res.json({
       success: true,
-      comments: comments
+      comments: comments,
+      claudeReplyPending
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1292,6 +1295,31 @@ app.post("/media/:groupId/post/:postId/comment/:commentIndex/reactions", (req, r
       success: true,
       reactions: reactions
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Poll for Claude's reply on a post
+app.get("/media/:groupId/post/:postId/claude-reply", (req, res) => {
+  try {
+    const { groupId, postId } = req.params;
+    const afterTimestamp = req.query.after;
+
+    const comments = getCommentsForItem(groupId, postId);
+    const claudeUserId = getClaudeUserId();
+
+    const claudeReply = comments.find(
+      (c) =>
+        c.userId === claudeUserId &&
+        (!afterTimestamp || new Date(c.timestamp) > new Date(afterTimestamp))
+    );
+
+    if (claudeReply) {
+      res.json({ ready: true, comment: claudeReply.comment, timestamp: claudeReply.timestamp });
+    } else {
+      res.json({ ready: false });
+    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1419,7 +1447,8 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
     });
 
     // Check if the comment mentions @Claude and generate a reply
-    if (comment && /@claude\b/i.test(comment)) {
+    const claudeReplyPending = !!(comment && /@claude\b/i.test(comment));
+    if (claudeReplyPending) {
       (async () => {
         try {
           const claudeUser = ensureClaudeUser(groupId);
@@ -1451,7 +1480,8 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
 
     res.json({
       success: true,
-      comments: comments
+      comments: comments,
+      claudeReplyPending
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
