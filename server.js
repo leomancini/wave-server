@@ -1223,6 +1223,11 @@ app.post("/media/:groupId/post/:postId/comment", async (req, res) => {
           });
 
           fs.writeFileSync(commentsFile, JSON.stringify(currentComments, null, 2));
+
+          // Treat Claude's comment the same as a user comment for notifications
+          processNotification("add", groupId, postId, uploaderId, claudeUser.id, "comment", {
+            comment: reply
+          });
         } catch (err) {
           console.error("Error generating Claude reply:", err);
         }
@@ -1483,6 +1488,11 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
           });
 
           fs.writeFileSync(commentsFile, JSON.stringify(currentComments, null, 2));
+
+          // Treat Claude's comment the same as a user comment for notifications
+          processNotification("add", groupId, itemId, uploaderId, claudeUser.id, "comment", {
+            comment: reply
+          });
         } catch (err) {
           console.error("Error generating Claude reply:", err);
         }
