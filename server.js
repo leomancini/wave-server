@@ -70,6 +70,7 @@ import deleteItem from "./functions/deleteItem.js";
 import groupItemsIntoPosts from "./functions/groupItemsIntoPosts.js";
 import generateClaudeResponse from "./functions/generateClaudeResponse.js";
 import ensureClaudeUser, { getClaudeUserId } from "./functions/ensureClaudeUser.js";
+import getGroupStats from "./functions/getGroupStats.js";
 
 const workerPool = new Set();
 const maxWorkers = Math.max(1, cpus().length - 1);
@@ -1207,7 +1208,12 @@ app.post("/media/:groupId/post/:postId/comment", async (req, res) => {
             }
           }));
 
-          const reply = await generateClaudeResponse(comment, commentsWithNames);
+          const stats = getGroupStats(groupId);
+          const reply = await generateClaudeResponse(comment, commentsWithNames, {
+            groupId,
+            users,
+            stats
+          });
 
           const currentComments = getCommentsForItem(groupId, postId);
           currentComments.push({
@@ -1462,7 +1468,12 @@ app.post("/media/:groupId/:itemId/comment", async (req, res) => {
             }
           }));
 
-          const reply = await generateClaudeResponse(comment, commentsWithNames);
+          const stats = getGroupStats(groupId);
+          const reply = await generateClaudeResponse(comment, commentsWithNames, {
+            groupId,
+            users,
+            stats
+          });
 
           const currentComments = getCommentsForItem(groupId, itemId);
           currentComments.push({
