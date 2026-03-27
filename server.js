@@ -390,6 +390,7 @@ const processUploadedFile = async (
     file.path = videoPath;
   } else {
     // Original image processing
+    const tempOutputPath = newPath + ".tmp";
     let dimensions;
     try {
       dimensions = await getDimensions(file.path);
@@ -398,15 +399,27 @@ const processUploadedFile = async (
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
-      await processImage(file.path, newPath, {
+      // Write to a temp file first so a failed sharp run doesn't leave
+      // a 0-byte file at the final path with the original already deleted
+      await processImage(file.path, tempOutputPath, {
         width: 1920,
         height: 1080,
         fit: "inside",
         withoutEnlargement: true,
         quality: 85
       });
+
+      // Verify the output is non-empty before committing
+      const stat = fs.statSync(tempOutputPath);
+      if (stat.size === 0) {
+        throw new Error("sharp produced a 0-byte output");
+      }
+
+      fs.renameSync(tempOutputPath, newPath);
     } catch (error) {
-      // Clean up the temp file if image processing fails
+      // Clean up temp output if it exists
+      try { fs.unlinkSync(tempOutputPath); } catch {}
+      // Clean up the original temp file
       try { fs.unlinkSync(file.path); } catch {}
       throw new Error(`Failed to process ${newFilename}: ${error.message}`);
     }
@@ -1026,13 +1039,14 @@ app.post(
       } else {
         const newFilename = `${mediaId}.jpg`;
         const newPath = path.join(path.dirname(file.path), newFilename);
+        const tempOutputPath = newPath + ".tmp";
         const dimensions = await getDimensions(file.path);
 
         while (workerPool.size >= maxWorkers) {
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
 
-        await processImage(file.path, newPath, {
+        await processImage(file.path, tempOutputPath, {
           width: 1920,
           height: 1080,
           fit: "inside",
@@ -1040,6 +1054,14 @@ app.post(
           quality: 85
         });
 
+        const stat = fs.statSync(tempOutputPath);
+        if (stat.size === 0) {
+          try { fs.unlinkSync(tempOutputPath); } catch {}
+          try { fs.unlinkSync(file.path); } catch {}
+          throw new Error("sharp produced a 0-byte output");
+        }
+
+        fs.renameSync(tempOutputPath, newPath);
         fs.unlinkSync(file.path);
 
         const thumbnailsDir = path.join("groups", groupId, "comment-media", "thumbnails");
