@@ -26,14 +26,15 @@ export default (items) => {
 
     postItems.forEach((i) => processedItemIds.add(i.metadata.itemId));
 
-    // Use the earliest item's uploadDate as the post date
-    const earliestItem = postItems[0];
+    // Use the latest item's uploadDate as the post date so multi-photo posts
+    // appear at the correct position in the feed
+    const latestItem = postItems[postItems.length - 1];
 
     posts.push({
       postId,
       items: postItems,
-      uploader: earliestItem.uploader,
-      uploadDate: earliestItem.metadata.uploadDate,
+      uploader: latestItem.uploader,
+      uploadDate: latestItem.metadata.uploadDate,
       isUnread: postItems.some((i) => i.isUnread)
     });
   }
