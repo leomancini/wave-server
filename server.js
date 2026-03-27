@@ -390,19 +390,26 @@ const processUploadedFile = async (
     file.path = videoPath;
   } else {
     // Original image processing
-    const dimensions = await getDimensions(file.path);
+    let dimensions;
+    try {
+      dimensions = await getDimensions(file.path);
 
-    while (workerPool.size >= maxWorkers) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      while (workerPool.size >= maxWorkers) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      await processImage(file.path, newPath, {
+        width: 1920,
+        height: 1080,
+        fit: "inside",
+        withoutEnlargement: true,
+        quality: 85
+      });
+    } catch (error) {
+      // Clean up the temp file if image processing fails
+      try { fs.unlinkSync(file.path); } catch {}
+      throw new Error(`Failed to process ${newFilename}: ${error.message}`);
     }
-
-    await processImage(file.path, newPath, {
-      width: 1920,
-      height: 1080,
-      fit: "inside",
-      withoutEnlargement: true,
-      quality: 85
-    });
 
     fs.unlinkSync(file.path);
 
@@ -762,6 +769,11 @@ app.get("/media/:groupId", (req, res) => {
               const uploader = users.find((user) => user.id === uploaderId);
 
               const metadata = getMetadataForItem(groupId, itemId);
+
+              // Skip orphan files that have no metadata (e.g. failed uploads)
+              if (!metadata.uploadDate) {
+                return null;
+              }
 
               return {
                 filename: filename,
