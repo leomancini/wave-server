@@ -23,10 +23,9 @@ export default async (
     postId: postId || itemId,
     mimeType: file.mimetype,
     size: file.size,
-    uploadDate: uploadDate,
+    uploadDate: Number(itemId.split("-")[0]),
     uploaderId: uploaderId,
-    dimensions,
-    uploadDate: Number(itemId.split("-")[0])
+    dimensions
   };
 
   if (mediaType === "video") {

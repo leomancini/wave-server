@@ -13,5 +13,7 @@ export default (recipientPhoneNumber, message) => {
     from: process.env.TWILIO_PHONE_NUMBER,
     to: recipientPhoneNumber,
     body: message
+  }).catch((error) => {
+    console.error("Error sending SMS:", error);
   });
 };

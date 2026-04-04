@@ -2268,7 +2268,7 @@ app.post("/users/:groupId/:userId/notification-preference", (req, res) => {
 
     res.json({
       success: true,
-      user: user[user.index]
+      user: users[user.index]
     });
   } catch (error) {
     console.error("Error updating notification preferences:", error);
