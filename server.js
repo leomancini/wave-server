@@ -43,6 +43,39 @@ app.use((req, res, next) => {
   next();
 });
 
+// Clean up orphan files left by interrupted uploads (e.g. server crash mid-processing).
+// Orphans are raw multer temp files that still carry the group-name prefix and/or
+// sharp .tmp outputs that were never renamed to their final path.
+const cleanupOrphanUploads = () => {
+  const groupsDir = "groups";
+  if (!fs.existsSync(groupsDir)) return;
+
+  for (const groupId of fs.readdirSync(groupsDir)) {
+    for (const subdir of ["media", "comment-media"]) {
+      const dir = path.join(groupsDir, groupId, subdir);
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;
+
+      for (const file of fs.readdirSync(dir)) {
+        const filePath = path.join(dir, file);
+        // Sharp temp files from interrupted processing
+        if (file.endsWith(".tmp")) {
+          fs.unlinkSync(filePath);
+          console.log(`Cleaned up temp file: ${filePath}`);
+          continue;
+        }
+        // Multer originals that were never processed: they still have the
+        // group-name prefix (processed files have it stripped)
+        if (subdir === "media" && file.startsWith(`${groupId}-`)) {
+          fs.unlinkSync(filePath);
+          console.log(`Cleaned up orphan upload: ${filePath}`);
+        }
+      }
+    }
+  }
+};
+
+cleanupOrphanUploads();
+
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
 });
@@ -74,16 +107,25 @@ import getGroupStats from "./functions/getGroupStats.js";
 import { findMediaFile, findCommentMediaFile, VIDEO_EXTENSIONS } from "./functions/findMediaFile.js";
 import collectPostMedia from "./functions/collectPostMedia.js";
 
+const WORKER_TIMEOUT_MS = 30_000;
 const workerPool = new Set();
 const maxWorkers = Math.max(1, cpus().length - 1);
 
 const processImage = async (inputPath, outputPath, options) => {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+
     const worker = new Worker(
       `
       const sharp = require('sharp');
       const { parentPort } = require('worker_threads');
-      
+
       parentPort.on('message', async ({ inputPath, outputPath, options }) => {
         try {
           await sharp(inputPath)
@@ -94,7 +136,7 @@ const processImage = async (inputPath, outputPath, options) => {
             })
             .jpeg({ quality: options.quality })
             .toFile(outputPath);
-          
+
           parentPort.postMessage('done');
         } catch (error) {
           parentPort.postMessage({ error: error.message });
@@ -104,20 +146,31 @@ const processImage = async (inputPath, outputPath, options) => {
       { eval: true }
     );
 
+    const timer = setTimeout(() => {
+      workerPool.delete(worker);
+      worker.terminate();
+      settle(reject, new Error("sharp worker timed out"));
+    }, WORKER_TIMEOUT_MS);
+
     worker.on("message", (result) => {
       workerPool.delete(worker);
       worker.terminate();
       if (result.error) {
-        reject(new Error(result.error));
+        settle(reject, new Error(result.error));
       } else {
-        resolve();
+        settle(resolve);
       }
     });
 
     worker.on("error", (error) => {
       workerPool.delete(worker);
       worker.terminate();
-      reject(error);
+      settle(reject, error);
+    });
+
+    worker.on("exit", (code) => {
+      workerPool.delete(worker);
+      settle(reject, new Error(`sharp worker exited with code ${code}`));
     });
 
     workerPool.add(worker);
@@ -1040,28 +1093,35 @@ app.post(
         const newFilename = `${mediaId}.jpg`;
         const newPath = path.join(path.dirname(file.path), newFilename);
         const tempOutputPath = newPath + ".tmp";
-        const dimensions = await getDimensions(file.path);
+        let dimensions;
 
-        while (workerPool.size >= maxWorkers) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
+        try {
+          dimensions = await getDimensions(file.path);
 
-        await processImage(file.path, tempOutputPath, {
-          width: 1920,
-          height: 1080,
-          fit: "inside",
-          withoutEnlargement: true,
-          quality: 85
-        });
+          while (workerPool.size >= maxWorkers) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
 
-        const stat = fs.statSync(tempOutputPath);
-        if (stat.size === 0) {
+          await processImage(file.path, tempOutputPath, {
+            width: 1920,
+            height: 1080,
+            fit: "inside",
+            withoutEnlargement: true,
+            quality: 85
+          });
+
+          const stat = fs.statSync(tempOutputPath);
+          if (stat.size === 0) {
+            throw new Error("sharp produced a 0-byte output");
+          }
+
+          fs.renameSync(tempOutputPath, newPath);
+        } catch (error) {
           try { fs.unlinkSync(tempOutputPath); } catch {}
           try { fs.unlinkSync(file.path); } catch {}
-          throw new Error("sharp produced a 0-byte output");
+          throw new Error(`Failed to process comment media: ${error.message}`);
         }
 
-        fs.renameSync(tempOutputPath, newPath);
         fs.unlinkSync(file.path);
 
         const thumbnailsDir = path.join("groups", groupId, "comment-media", "thumbnails");
