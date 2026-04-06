@@ -9,4 +9,4 @@ mkdir -p "$BACKUP_DIR"
 zip -rq "$BACKUP_DIR/groups-$TIMESTAMP.zip" "$GROUPS_DIR"
 
 # Remove backups older than 1 day
-find "$BACKUP_DIR" -name "groups-*.zip" -mtime +1 -delete
+find "$BACKUP_DIR" -name "groups-*.zip" -mtime +0 -not -name "groups-$TIMESTAMP.zip" -delete
