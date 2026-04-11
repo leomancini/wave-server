@@ -951,7 +951,7 @@ app.get("/media/:groupId/:itemId", (req, res) => {
     const ext = path.extname(filePath).toLowerCase();
     const videoContentTypes = {
       ".mp4": "video/mp4",
-      ".mov": "video/quicktime",
+      ".mov": "video/mp4",
       ".webm": "video/webm",
       ".avi": "video/x-msvideo",
       ".mkv": "video/x-matroska"
@@ -1000,7 +1000,7 @@ app.get("/comment-media/:groupId/:mediaId", (req, res) => {
     const ext = path.extname(filePath).toLowerCase();
     const videoContentTypes = {
       ".mp4": "video/mp4",
-      ".mov": "video/quicktime",
+      ".mov": "video/mp4",
       ".webm": "video/webm",
       ".avi": "video/x-msvideo",
       ".mkv": "video/x-matroska"
@@ -2215,7 +2215,7 @@ app.get("/media/:groupId/:filename", async (req, res) => {
     const ext = path.extname(filePath).toLowerCase();
     const videoContentTypes = {
       ".mp4": "video/mp4",
-      ".mov": "video/quicktime",
+      ".mov": "video/mp4",
       ".webm": "video/webm",
       ".avi": "video/x-msvideo",
       ".mkv": "video/x-matroska"
