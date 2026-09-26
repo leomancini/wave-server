@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import getMetadataForItem from "./getMetadataForItem.js";
+import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "./findMediaFile.js";
 
 export default (groupId, itemId, requestedOwnerId) => {
   try {
@@ -55,9 +56,8 @@ export default (groupId, itemId, requestedOwnerId) => {
       }
     ];
 
-    // Also try video extensions for media files
-    const videoExtensions = [".mp4", ".mov", ".webm", ".avi", ".mkv"];
-    for (const ext of videoExtensions) {
+    // Also try video and audio extensions for media files
+    for (const ext of [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS]) {
       filesToDelete.push({
         path: path.join(groupPath, "media", `${cleanedItemId}${ext}`),
         type: "media"
