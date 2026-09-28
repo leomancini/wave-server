@@ -215,10 +215,14 @@ const upload = multer({
       return;
     }
 
-    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
+    if (
+      file.mimetype.startsWith("image/") ||
+      file.mimetype.startsWith("video/") ||
+      file.mimetype.startsWith("audio/")
+    ) {
       cb(null, true);
     } else {
-      cb(new Error("Only image and video files are allowed!"));
+      cb(new Error("Only image, video, and audio files are allowed!"));
     }
   }
 });
@@ -388,6 +392,75 @@ const generateVideoThumbnail = (videoPath, thumbnailPath) => {
   });
 };
 
+const isAudio = (file) => file.mimetype && file.mimetype.startsWith("audio/");
+
+const AUDIO_EXTENSION = ".m4a";
+
+// Probe an uploaded audio file for its duration (seconds) and codec/container
+const getAudioInfo = (filePath) => {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "ffprobe",
+      [
+        "-v", "error",
+        "-select_streams", "a:0",
+        "-show_entries", "stream=codec_name,duration:format=duration,format_name",
+        "-of", "json",
+        filePath
+      ],
+      (error, stdout) => {
+        if (error) return reject(error);
+        try {
+          const data = JSON.parse(stdout);
+          const stream = data.streams?.[0];
+          if (!stream) {
+            return reject(new Error("No audio stream found"));
+          }
+          const rawDuration = parseFloat(stream.duration ?? data.format?.duration);
+          resolve({
+            codec: stream.codec_name,
+            formatName: data.format?.format_name || "",
+            // MediaRecorder output (esp. webm from Chrome) sometimes has no
+            // duration in the header; leave it null and fill it in after transcoding
+            duration: Number.isFinite(rawDuration) ? rawDuration : null
+          });
+        } catch (e) {
+          reject(e);
+        }
+      }
+    );
+  });
+};
+
+// Normalize any uploaded audio (webm/opus from Chrome, ogg from Firefox,
+// mp4/aac from iOS Safari, mp3/wav/etc. from the file picker) into an
+// AAC .m4a file. AAC in an MP4 container is the one format every browser,
+// and in particular iOS Safari, can play back.
+const transcodeAudio = (inputPath, outputPath, { codec, formatName }) => {
+  const isMp4Container = /\b(mov|mp4|m4a)\b/.test(formatName);
+  const canCopy = codec === "aac" && isMp4Container;
+
+  return new Promise((resolve, reject) => {
+    execFile(
+      "ffmpeg",
+      [
+        "-i", inputPath,
+        "-vn",
+        "-map_metadata", "-1",
+        ...(canCopy ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "128k"]),
+        "-movflags", "+faststart",
+        "-f", "mp4",
+        "-y",
+        outputPath
+      ],
+      (error) => {
+        if (error) return reject(error);
+        resolve(outputPath);
+      }
+    );
+  });
+};
+
 const processUploadedFile = async (
   file,
   groupId,
@@ -399,8 +472,63 @@ const processUploadedFile = async (
   orderIndex
 ) => {
   const isVideoFile = isVideo(file);
+  const isAudioFile = isAudio(file);
 
-  if (isVideoFile) {
+  if (isAudioFile) {
+    const audioFilename = `${itemId}${AUDIO_EXTENSION}`;
+    const audioPath = path.join(path.dirname(file.path), audioFilename);
+    const tempOutputPath = audioPath + ".tmp";
+    let duration = null;
+
+    try {
+      const info = await getAudioInfo(file.path);
+      await transcodeAudio(file.path, tempOutputPath, info);
+
+      const stat = fs.statSync(tempOutputPath);
+      if (stat.size === 0) {
+        throw new Error("ffmpeg produced a 0-byte output");
+      }
+
+      // Re-probe the transcoded file: it always has a proper duration header
+      duration = (await getAudioInfo(tempOutputPath)).duration ?? info.duration;
+
+      fs.renameSync(tempOutputPath, audioPath);
+    } catch (error) {
+      try { fs.unlinkSync(tempOutputPath); } catch {}
+      try { fs.unlinkSync(file.path); } catch {}
+      throw new Error(`Failed to process ${audioFilename}: ${error.message}`);
+    }
+
+    fs.unlinkSync(file.path);
+
+    try {
+      const tasks = [
+        saveMetadata(groupId, file, itemId, uploaderId, null, null, postId, "audio", orderIndex, {
+          duration: duration !== null ? Math.round(duration * 100) / 100 : undefined
+        })
+      ];
+
+      if (!postId || itemId === postId) {
+        tasks.push(
+          updateUnreadItems(groupId, postId || itemId, uploaderId).catch((err) => {
+            console.error("Error updating unread items:", err);
+          })
+        );
+      }
+
+      await Promise.all(tasks);
+    } catch (error) {
+      console.error(`Error processing audio ${audioFilename}:`, error);
+      throw new Error(`Failed to process ${audioFilename}: ${error.message}`);
+    }
+
+    if (!postId || itemId === postId) {
+      processNotification("add", groupId, postId || itemId, uploaderId, null, "upload", null);
+    }
+
+    file.filename = audioFilename;
+    file.path = audioPath;
+  } else if (isVideoFile) {
     // For videos: keep original file, just rename with proper extension
     const ext = getVideoExtension(file.mimetype);
     const videoFilename = `${itemId}${ext}`;
@@ -533,10 +661,8 @@ app.post(
             .status(403)
             .json({ error: "Unknown user tried to upload, file rejected!" });
         }
-        if (err.message.includes("Only image and video files")) {
-          return res
-            .status(400)
-            .json({ error: "Only image and video files are allowed!" });
+        if (err.message.includes("files are allowed")) {
+          return res.status(400).json({ error: err.message });
         }
         if (err.code === "LIMIT_FILE_SIZE") {
           return res.status(413).json({ error: "File too large!" });
@@ -949,16 +1075,17 @@ app.get("/media/:groupId/:itemId", (req, res) => {
     }
 
     const ext = path.extname(filePath).toLowerCase();
-    const videoContentTypes = {
+    const mediaContentTypes = {
       ".mp4": "video/mp4",
       ".mov": "video/mp4",
       ".webm": "video/webm",
       ".avi": "video/x-msvideo",
-      ".mkv": "video/x-matroska"
+      ".mkv": "video/x-matroska",
+      ".m4a": "audio/mp4"
     };
 
-    if (videoContentTypes[ext]) {
-      res.setHeader("Content-Type", videoContentTypes[ext]);
+    if (mediaContentTypes[ext]) {
+      res.setHeader("Content-Type", mediaContentTypes[ext]);
     }
 
     res.sendFile(path.resolve(filePath));
@@ -998,16 +1125,17 @@ app.get("/comment-media/:groupId/:mediaId", (req, res) => {
     }
 
     const ext = path.extname(filePath).toLowerCase();
-    const videoContentTypes = {
+    const mediaContentTypes = {
       ".mp4": "video/mp4",
       ".mov": "video/mp4",
       ".webm": "video/webm",
       ".avi": "video/x-msvideo",
-      ".mkv": "video/x-matroska"
+      ".mkv": "video/x-matroska",
+      ".m4a": "audio/mp4"
     };
 
-    if (videoContentTypes[ext]) {
-      res.setHeader("Content-Type", videoContentTypes[ext]);
+    if (mediaContentTypes[ext]) {
+      res.setHeader("Content-Type", mediaContentTypes[ext]);
     }
 
     res.sendFile(path.resolve(filePath));

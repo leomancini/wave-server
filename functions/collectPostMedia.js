@@ -3,7 +3,7 @@ import path from "path";
 import sharp from "sharp";
 import getMetadataForItem from "./getMetadataForItem.js";
 import getCommentsForItem from "./getCommentsForItem.js";
-import { findMediaFile, findCommentMediaFile, VIDEO_EXTENSIONS } from "./findMediaFile.js";
+import { findMediaFile, findCommentMediaFile, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "./findMediaFile.js";
 import extractVideoFrames from "./extractVideoFrames.js";
 
 const MAX_IMAGES = 10;
@@ -11,6 +11,19 @@ const MAX_IMAGES = 10;
 const isVideoFile = (filePath) => {
   const ext = path.extname(filePath).toLowerCase();
   return VIDEO_EXTENSIONS.includes(ext);
+};
+
+const isAudioFile = (filePath) => {
+  const ext = path.extname(filePath).toLowerCase();
+  return AUDIO_EXTENSIONS.includes(ext);
+};
+
+const formatDuration = (seconds) => {
+  if (!seconds || !Number.isFinite(seconds)) return "";
+  const total = Math.round(seconds);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
 };
 
 const resizeImageToBuffer = async (filePath) => {
@@ -64,7 +77,14 @@ export default async (groupId, postId) => {
     if (!filePath) continue;
 
     try {
-      if (isVideoFile(filePath)) {
+      if (isAudioFile(filePath)) {
+        // Claude can't listen to audio, but should know the post is a clip
+        const duration = formatDuration(item.metadata.duration);
+        contentBlocks.push({
+          type: "text",
+          text: `(this post is an audio clip${duration ? `, ${duration} long` : ""}. you can't hear it.)`
+        });
+      } else if (isVideoFile(filePath)) {
         const frames = await extractVideoFrames(filePath);
         for (const frame of frames) {
           if (contentBlocks.length >= MAX_IMAGES) break;
@@ -89,7 +109,9 @@ export default async (groupId, postId) => {
     if (!mediaPath) continue;
 
     try {
-      if (isVideoFile(mediaPath)) {
+      if (isAudioFile(mediaPath)) {
+        continue;
+      } else if (isVideoFile(mediaPath)) {
         const frames = await extractVideoFrames(mediaPath);
         for (const frame of frames) {
           if (contentBlocks.length >= MAX_IMAGES) break;

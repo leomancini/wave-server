@@ -10,7 +10,8 @@ export default async (
   uploadDate,
   postId,
   mediaType,
-  orderIndex
+  orderIndex,
+  extra = {}
 ) => {
   const metadataDir = path.join("groups", groupId, "metadata");
   if (!fs.existsSync(metadataDir)) {
@@ -28,12 +29,20 @@ export default async (
     dimensions
   };
 
-  if (mediaType === "video") {
-    metadata.mediaType = "video";
+  // Images are the default and carry no mediaType (legacy metadata has none)
+  if (mediaType && mediaType !== "image") {
+    metadata.mediaType = mediaType;
   }
 
   if (orderIndex !== undefined) {
     metadata.orderIndex = orderIndex;
+  }
+
+  // Extra fields, e.g. { duration } for audio clips
+  for (const [key, value] of Object.entries(extra)) {
+    if (value !== undefined && value !== null) {
+      metadata[key] = value;
+    }
   }
 
   fs.writeFileSync(

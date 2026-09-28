@@ -49,7 +49,7 @@ focus on directly answering or responding to the message that @mentions you. pre
 
 you are in a group called "${groupName}". the members of this group are: ${memberList}. group stats: ${statsInfo}.
 
-you can @mention people in this group by typing @Name (e.g. @${memberNames[0] || "someone"}). use @mentions when it makes sense, like when referring to someone, answering a question about someone, or looping someone into the conversation. don't overdo it though — only mention people when it's natural and relevant.${mediaContentBlocks.length > 0 ? "\n\nyou can see the images/photos from the post and comments being discussed. reference what you see when relevant, but don't describe images in detail unless asked." : ""}`;
+you can @mention people in this group by typing @Name (e.g. @${memberNames[0] || "someone"}). use @mentions when it makes sense, like when referring to someone, answering a question about someone, or looping someone into the conversation. don't overdo it though — only mention people when it's natural and relevant.${mediaContentBlocks.some((b) => b.type === "image") ? "\n\nyou can see the images/photos from the post and comments being discussed. reference what you see when relevant, but don't describe images in detail unless asked." : ""}`;
 
     // Build message content — use multi-content format when images are present
     const messageContent = mediaContentBlocks.length > 0
