@@ -1922,7 +1922,8 @@ app.post("/create-group", (req, res) => {
 
     const config = {
       createdAt: new Date().toISOString(),
-      reactions: ["❤️", "‼️", "😂", "🔥", "🌊"]
+      reactions: ["❤️", "‼️", "😂", "🔥", "🌊"],
+      postTypes: "all"
     };
     fs.writeFileSync(
       path.join(groupPath, "config.json"),
@@ -2062,6 +2063,49 @@ app.post("/update-reaction-emojis/:groupId", async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: "Failed to update reaction emojis",
+      details: error.message
+    });
+  }
+});
+
+// Which kinds of posts the composer offers. Only affects what the client
+// lets people create; existing posts are never touched.
+const POST_TYPES = ["all", "visual", "audio"];
+
+app.post("/update-post-types/:groupId", (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { postTypes } = req.body;
+
+    if (!POST_TYPES.includes(postTypes)) {
+      return res.status(400).json({
+        error: `postTypes must be one of: ${POST_TYPES.join(", ")}`
+      });
+    }
+
+    const groupsDir = path.join("groups", groupId);
+    if (!fs.existsSync(groupsDir)) {
+      return res.status(404).json({
+        error: "Group not found"
+      });
+    }
+
+    const configPath = path.join(groupsDir, "config.json");
+    let config = {};
+    if (fs.existsSync(configPath)) {
+      config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    }
+    config.postTypes = postTypes;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    res.json({
+      success: true,
+      message: "Successfully updated post types",
+      postTypes
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to update post types",
       details: error.message
     });
   }
